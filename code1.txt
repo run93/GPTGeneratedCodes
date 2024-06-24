@@ -1,0 +1,67 @@
+import re
+from sklearn.feature_extraction.text import CountVectorizer
+
+# Sample list of terms
+terms_list = [
+    "1st highest count xxx in AAA",
+    "2nd highest count yyy in AAA",
+    "1st highest count yyy in AAA"
+]
+
+# Define stop words
+stop_words = set(["the", "on", "a", "an"])
+
+# Preprocess the text to remove stop words
+def preprocess_text(text):
+    # Remove specific stop words
+    text = re.sub(r'\b(?:the|on|a|an)\b', '', text, flags=re.IGNORECASE)
+    # Remove extra spaces
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+processed_terms_list = [preprocess_text(term) for term in terms_list]
+
+# Function to get n-grams from the text
+def get_ngrams(texts, n=10):
+    vectorizer = CountVectorizer(ngram_range=(1, n), stop_words='english').fit(texts)
+    transformed_texts = vectorizer.transform(texts)
+    ngrams = vectorizer.get_feature_names_out()
+    counts = transformed_texts.toarray().sum(axis=0)
+    ngram_counts = dict(zip(ngrams, counts))
+    return ngram_counts
+
+# Get n-grams for up to 10-grams
+ngram_counts = get_ngrams(processed_terms_list, n=10)
+
+# Filter out n-grams with count < 2 and those that end with "in"
+filtered_ngram_counts = {ngram: count for ngram, count in ngram_counts.items() if count >= 2 and not ngram.endswith(' in')}
+
+# Sort n-grams by length and frequency
+sorted_ngrams = sorted(filtered_ngram_counts.items(), key=lambda x: (-len(x[0]), -x[1]))
+
+# Function to split terms based on filtered n-grams
+def split_based_on_ngrams(term, ngrams):
+    result = []
+    term = term.lower()
+    while term:
+        for ngram in ngrams:
+            if term.startswith(ngram):
+                result.append(ngram)
+                term = term[len(ngram):].strip()
+                break
+        else:
+            # If no ngram matches, split by the first space
+            if ' ' in term:
+                first_word, term = term.split(' ', 1)
+                result.append(first_word)
+            else:
+                result.append(term)
+                term = ''
+    return result
+
+# Split terms list based on the sorted n-grams
+split_terms_list = [split_based_on_ngrams(term, [ngram for ngram, count in sorted_ngrams]) for term in processed_terms_list]
+
+# Display the split terms list
+for split_terms in split_terms_list:
+    print(split_terms)
