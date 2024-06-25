@@ -1,0 +1,67 @@
+import pandas as pd
+from sentence_transformers import SentenceTransformer, util
+
+# Load the pre-trained sentence transformer model
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Function to generate n-grams from a single sentence
+def generate_ngrams_from_sentence(sentence, n):
+    ngrams_list = []
+    words = sentence.split()
+    # Generate n-grams for 1 to n words
+    for i in range(1, n + 1):
+        ngrams_list.extend([' '.join(words[j:j + i]) for j in range(len(words) - i + 1)])
+    return ngrams_list
+
+# Function to generate n-grams for a list of sentences
+def generate_ngrams(sentences, n):
+    all_ngrams_list = []
+    for sentence in sentences:
+        all_ngrams_list.append(generate_ngrams_from_sentence(sentence, n))
+    return all_ngrams_list
+
+# Function to calculate similarities between n-grams and target terms
+def calculate_similarities(ngrams, target_terms):
+    target_embeddings = model.encode(target_terms)
+    best_matches = {target: (None, -1) for target in target_terms}
+    for term in ngrams:
+        term_embedding = model.encode(term)
+        for target, target_embedding in zip(target_terms, target_embeddings):
+            sim = util.cos_sim(term_embedding, target_embedding).item()
+            if sim > best_matches[target][1]:
+                best_matches[target] = (term, sim)
+    return best_matches
+
+# Example list of sentences
+sentences = [
+    "the urban heat wave is a sign to global climate change.",
+    "we see sea level increased a lot in past years.",
+]
+
+# Target terms
+target_terms = ['flood or water', 'heat or heatwave', 'earthquake']
+
+# Generate n-grams (from 1 to 3 words) for each sentence
+all_ngrams = generate_ngrams(sentences, 5)
+
+# Calculate similarities and return top 1 term for each target term in each sentence
+results = []
+for i, ngrams in enumerate(all_ngrams):
+    best_matches = calculate_similarities(ngrams, target_terms)
+    result = {'sentence': sentences[i]}
+    result.update({target: best_matches[target][1] for target in target_terms})
+
+    # Find the highest value target term and its corresponding n-gram term
+    highest_target = max(best_matches, key=lambda k: best_matches[k][1])
+    highest_term = best_matches[highest_target][0]
+    highest_value = best_matches[highest_target][1]
+
+    result['highest_value_target'] = highest_target
+    result['highest_value_ngram'] = highest_term
+    results.append(result)
+
+# Convert results to DataFrame
+df = pd.DataFrame(results)
+
+# Display the DataFrame
+print(df)
