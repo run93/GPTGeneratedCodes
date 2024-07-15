@@ -36,7 +36,7 @@ for sentence in sentences:
         target_term = row['target_term']
         term_type = row['term_type']
         
-        if original_term in sentence:
+        if original_term in mapped_sentence:  # Check in mapped_sentence to handle replacements correctly
             mapped_sentence = mapped_sentence.replace(original_term, target_term)
             unmapped_terms -= set(original_term.split())  # Remove mapped terms from unmapped terms
             if term_type == 'A':
@@ -49,7 +49,8 @@ for sentence in sentences:
                 type_d.append(target_term)
             elif term_type == 'E':
                 type_e.append(target_term)
-    
+            break  # Stop after the first match
+
     output_df = output_df.append({
         'Original Sentence': sentence,
         'Mapped Sentences': mapped_sentence,
