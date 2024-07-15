@@ -1,14 +1,15 @@
 import pandas as pd
 
-# Sample mapping data
+# Updated mapping data
 mapping_data = {
-    'original_term': ['name of c', 'this is', 'example term', 'another example', 'sample'],
-    'target_term': ['NC', 'T', 'ET', 'AE', 'S'],
-    'term_type': ['A', 'B', 'C', 'D', 'E']
+    'original_term': ['name of c', 'this is', 'example term', 'another example', 'sample', 'this'],
+    'target_term': ['NC', 'T', 'ET', 'AE', 'S', 'T'],
+    'term_type': ['A', 'B', 'C', 'D', 'E', 'B']
 }
 
-# Creating a DataFrame from the sample mapping data
+# Creating a DataFrame from the updated mapping data
 mapping_df = pd.DataFrame(mapping_data)
+
 # Remove duplicates
 mapping_df = mapping_df.drop_duplicates()
 
@@ -22,40 +23,48 @@ sentences = ['this is a name of c', 'that is a name of c', 'this is', 'this is a
 # Initialize the output dataframe
 output_df = pd.DataFrame(columns=['Original Sentence', 'Mapped Sentences', 'Unmapped Terms', 'Type A', 'Type B', 'Type C', 'Type D', 'Type E'])
 
-for sentence in sentences:
+# Function to map terms and find unmapped terms
+def map_terms(sentence, mapping_df):
     mapped_sentence = sentence
-    unmapped_terms = set(sentence.split())  # Initialize with all words in the sentence
+    unmapped_terms = set(sentence.split())
     type_a = []
     type_b = []
     type_c = []
     type_d = []
     type_e = []
+
+    # Split sentence by original terms from longest to shortest
+    for _, row in mapping_df.iterrows():
+        original_term = row['original_term']
+        target_term = row['target_term']
+        term_type = row['term_type']
+
+        if original_term in mapped_sentence:
+            parts = mapped_sentence.split(original_term)
+            mapped_sentence = target_term.join(parts)
+
+            # Update unmapped terms
+            for part in parts:
+                unmapped_terms -= set(original_term.split())
+                unmapped_terms -= set(part.split())
+
+            # Update term types
+            if term_type == 'A':
+                type_a.append(target_term)
+            elif term_type == 'B':
+                type_b.append(target_term)
+            elif term_type == 'C':
+                type_c.append(target_term)
+            elif term_type == 'D':
+                type_d.append(target_term)
+            elif term_type == 'E':
+                type_e.append(target_term)
     
-    # Continue checking and replacing terms until no more matches are found
-    while True:
-        term_replaced = False
-        for _, row in mapping_df.iterrows():
-            original_term = row['original_term']
-            target_term = row['target_term']
-            term_type = row['term_type']
-            
-            if original_term in mapped_sentence:  # Check in mapped_sentence to handle replacements correctly
-                mapped_sentence = mapped_sentence.replace(original_term, target_term)
-                unmapped_terms -= set(original_term.split())  # Remove mapped terms from unmapped terms
-                if term_type == 'A':
-                    type_a.append(target_term)
-                elif term_type == 'B':
-                    type_b.append(target_term)
-                elif term_type == 'C':
-                    type_c.append(target_term)
-                elif term_type == 'D':
-                    type_d.append(target_term)
-                elif term_type == 'E':
-                    type_e.append(target_term)
-                term_replaced = True
-                break  # Stop after the first match in this iteration
-        if not term_replaced:
-            break  # Exit the loop if no terms were replaced in this iteration
+    return mapped_sentence, unmapped_terms, type_a, type_b, type_c, type_d, type_e
+
+# Process each sentence
+for sentence in sentences:
+    mapped_sentence, unmapped_terms, type_a, type_b, type_c, type_d, type_e = map_terms(sentence, mapping_df)
 
     output_df = output_df.append({
         'Original Sentence': sentence,
@@ -67,3 +76,6 @@ for sentence in sentences:
         'Type D': ' '.join(type_d),
         'Type E': ' '.join(type_e)
     }, ignore_index=True)
+
+# Display the output dataframe
+import ace_tools as tools; tools.display_dataframe_to_user(name="Mapped Sentences Output", dataframe=output_df)
