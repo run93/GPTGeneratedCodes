@@ -43,10 +43,8 @@ def map_terms(sentence, mapping_df):
             parts = mapped_sentence.split(original_term)
             mapped_sentence = target_term.join(parts)
 
-            # Update unmapped terms
-            for part in parts:
-                unmapped_terms -= set(original_term.split())
-                unmapped_terms -= set(part.split())
+            # Remove mapped terms from unmapped terms
+            unmapped_terms -= set(original_term.split())
 
             # Update term types
             if term_type == 'A':
@@ -60,7 +58,13 @@ def map_terms(sentence, mapping_df):
             elif term_type == 'E':
                 type_e.append(target_term)
     
-    return mapped_sentence, unmapped_terms, type_a, type_b, type_c, type_d, type_e
+    # Update unmapped terms by checking what remains in the mapped sentence
+    final_unmapped_terms = []
+    for term in unmapped_terms:
+        if term in mapped_sentence:
+            final_unmapped_terms.append(term)
+
+    return mapped_sentence, final_unmapped_terms, type_a, type_b, type_c, type_d, type_e
 
 # Process each sentence
 for sentence in sentences:
