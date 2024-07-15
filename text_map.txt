@@ -24,11 +24,23 @@ def find_unmapped_words(mapped_term, mappings):
     unmapped_words = term_words - mapped_words
     return ' '.join(unmapped_words)
 
+def find_mapped_types(mapped_term, type_mappings):
+    words = mapped_term.split()
+    type_a = [word for word in words if word in type_mappings['type A']]
+    type_b = [word for word in words if word in type_mappings['type B']]
+    return ' '.join(type_a), ' '.join(type_b)
+
 # File path to the CSV file
 csv_file_path = 'mappings.csv'
 
 # Read mappings from CSV
 mappings = read_mappings_from_csv(csv_file_path)
+
+# Define type mappings
+type_mappings = {
+    'type A': ['NC'],
+    'type B': ['T']
+}
 
 # Assuming 'input_df' is already defined and contains a column 'Original Term'
 input_data = {'Original Term': ['this is a name of c', 'that is a name of c', 'this is']}
@@ -44,9 +56,10 @@ mapped_terms = map_terms(terms, mappings)
 data = []
 for original, mapped in mapped_terms:
     unmapped_words = find_unmapped_words(mapped, mappings)
-    data.append([original, mapped, unmapped_words])
+    type_a, type_b = find_mapped_types(mapped, type_mappings)
+    data.append([original, mapped, unmapped_words, type_a, type_b])
 
-df = pd.DataFrame(data, columns=['Original Term', 'Mapped Term', 'Unmapped Words'])
+df = pd.DataFrame(data, columns=['Original Term', 'Mapped Term', 'Unmapped Words', 'Type A', 'Type B'])
 
 import ace_tools as tools; tools.display_dataframe_to_user(name="Mapped Terms DataFrame", dataframe=df)
 
