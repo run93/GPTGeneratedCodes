@@ -31,25 +31,31 @@ for sentence in sentences:
     type_d = []
     type_e = []
     
-    for _, row in mapping_df.iterrows():
-        original_term = row['original_term']
-        target_term = row['target_term']
-        term_type = row['term_type']
-        
-        if original_term in mapped_sentence:  # Check in mapped_sentence to handle replacements correctly
-            mapped_sentence = mapped_sentence.replace(original_term, target_term)
-            unmapped_terms -= set(original_term.split())  # Remove mapped terms from unmapped terms
-            if term_type == 'A':
-                type_a.append(target_term)
-            elif term_type == 'B':
-                type_b.append(target_term)
-            elif term_type == 'C':
-                type_c.append(target_term)
-            elif term_type == 'D':
-                type_d.append(target_term)
-            elif term_type == 'E':
-                type_e.append(target_term)
-            break  # Stop after the first match
+    # Continue checking and replacing terms until no more matches are found
+    while True:
+        term_replaced = False
+        for _, row in mapping_df.iterrows():
+            original_term = row['original_term']
+            target_term = row['target_term']
+            term_type = row['term_type']
+            
+            if original_term in mapped_sentence:  # Check in mapped_sentence to handle replacements correctly
+                mapped_sentence = mapped_sentence.replace(original_term, target_term)
+                unmapped_terms -= set(original_term.split())  # Remove mapped terms from unmapped terms
+                if term_type == 'A':
+                    type_a.append(target_term)
+                elif term_type == 'B':
+                    type_b.append(target_term)
+                elif term_type == 'C':
+                    type_c.append(target_term)
+                elif term_type == 'D':
+                    type_d.append(target_term)
+                elif term_type == 'E':
+                    type_e.append(target_term)
+                term_replaced = True
+                break  # Stop after the first match in this iteration
+        if not term_replaced:
+            break  # Exit the loop if no terms were replaced in this iteration
 
     output_df = output_df.append({
         'Original Sentence': sentence,
@@ -61,6 +67,3 @@ for sentence in sentences:
         'Type D': ' '.join(type_d),
         'Type E': ' '.join(type_e)
     }, ignore_index=True)
-
-# Display the output dataframe
-import ace_tools as tools; tools.display_dataframe_to_user(name="Mapped Sentences Output", dataframe=output_df)
