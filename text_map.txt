@@ -1,66 +1,59 @@
 import pandas as pd
-import csv
 
-def read_mappings_from_csv(file_path):
-    mappings = {}
-    with open(file_path, mode='r') as file:
-        csv_reader = csv.DictReader(file)
-        for row in csv_reader:
-            mappings[row['origin']] = row['target']
-    return mappings
-
-def map_terms(terms, mappings):
-    mapped_terms = []
-    for term in terms:
-        original_term = term
-        for key, value in mappings.items():
-            term = term.replace(key, value)
-        mapped_terms.append((original_term, term))
-    return mapped_terms
-
-def find_unmapped_words(mapped_term, mappings):
-    mapped_words = set(' '.join(mappings.values()).split())
-    term_words = set(mapped_term.split())
-    unmapped_words = term_words - mapped_words
-    return ' '.join(unmapped_words)
-
-def find_mapped_types(mapped_term, type_mappings):
-    words = mapped_term.split()
-    type_a = [word for word in words if word in type_mappings['type A']]
-    type_b = [word for word in words if word in type_mappings['type B']]
-    return ' '.join(type_a), ' '.join(type_b)
-
-# File path to the CSV file
-csv_file_path = 'mappings.csv'
-
-# Read mappings from CSV
-mappings = read_mappings_from_csv(csv_file_path)
-
-# Define type mappings
-type_mappings = {
-    'type A': ['NC'],
-    'type B': ['T']
+# Sample mapping data
+mapping_data = {
+    'original_term': ['name of c', 'this is', 'example term', 'another example', 'sample'],
+    'target_term': ['NC', 'T', 'ET', 'AE', 'S'],
+    'term_type': ['A', 'B', 'C', 'D', 'E']
 }
 
-# Assuming 'input_df' is already defined and contains a column 'Original Term'
-input_data = {'Original Term': ['this is a name of c', 'that is a name of c', 'this is']}
-input_df = pd.DataFrame(input_data)
+# Creating a DataFrame from the sample mapping data
+mapping_df = pd.DataFrame(mapping_data)
 
-# Extract terms from 'input_df'
-terms = input_df['Original Term'].tolist()
+# Sample sentences
+sentences = ['this is a name of c', 'that is a name of c', 'this is', 'this is an example term', 'another example of a sample']
 
-# Map the terms
-mapped_terms = map_terms(terms, mappings)
+# Initialize the output dataframe
+output_df = pd.DataFrame(columns=['Original Sentence', 'Mapped Sentences', 'Unmapped Terms', 'Type A', 'Type B', 'Type C', 'Type D', 'Type E'])
 
-# Create DataFrame
-data = []
-for original, mapped in mapped_terms:
-    unmapped_words = find_unmapped_words(mapped, mappings)
-    type_a, type_b = find_mapped_types(mapped, type_mappings)
-    data.append([original, mapped, unmapped_words, type_a, type_b])
+for sentence in sentences:
+    mapped_sentence = sentence
+    unmapped_terms = set(sentence.split())  # Initialize with all words in the sentence
+    type_a = []
+    type_b = []
+    type_c = []
+    type_d = []
+    type_e = []
+    
+    for _, row in mapping_df.iterrows():
+        original_term = row['original_term']
+        target_term = row['target_term']
+        term_type = row['term_type']
+        
+        if original_term in sentence:
+            mapped_sentence = mapped_sentence.replace(original_term, target_term)
+            unmapped_terms -= set(original_term.split())  # Remove mapped terms from unmapped terms
+            if term_type == 'A':
+                type_a.append(target_term)
+            elif term_type == 'B':
+                type_b.append(target_term)
+            elif term_type == 'C':
+                type_c.append(target_term)
+            elif term_type == 'D':
+                type_d.append(target_term)
+            elif term_type == 'E':
+                type_e.append(target_term)
+    
+    output_df = output_df.append({
+        'Original Sentence': sentence,
+        'Mapped Sentences': mapped_sentence,
+        'Unmapped Terms': ' '.join(unmapped_terms),
+        'Type A': ' '.join(type_a),
+        'Type B': ' '.join(type_b),
+        'Type C': ' '.join(type_c),
+        'Type D': ' '.join(type_d),
+        'Type E': ' '.join(type_e)
+    }, ignore_index=True)
 
-df = pd.DataFrame(data, columns=['Original Term', 'Mapped Term', 'Unmapped Words', 'Type A', 'Type B'])
-
-import ace_tools as tools; tools.display_dataframe_to_user(name="Mapped Terms DataFrame", dataframe=df)
-
-print(df)
+# Display the output dataframe
+import ace_tools as tools; tools.display_dataframe_to_user(name="Mapped Sentences Output", dataframe=output_df)
