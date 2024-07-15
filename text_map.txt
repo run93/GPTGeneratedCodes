@@ -1,0 +1,53 @@
+import pandas as pd
+import csv
+
+def read_mappings_from_csv(file_path):
+    mappings = {}
+    with open(file_path, mode='r') as file:
+        csv_reader = csv.DictReader(file)
+        for row in csv_reader:
+            mappings[row['origin']] = row['target']
+    return mappings
+
+def map_terms(terms, mappings):
+    mapped_terms = []
+    for term in terms:
+        original_term = term
+        for key, value in mappings.items():
+            term = term.replace(key, value)
+        mapped_terms.append((original_term, term))
+    return mapped_terms
+
+def find_unmapped_words(mapped_term, mappings):
+    mapped_words = set(' '.join(mappings.values()).split())
+    term_words = set(mapped_term.split())
+    unmapped_words = term_words - mapped_words
+    return ' '.join(unmapped_words)
+
+# File path to the CSV file
+csv_file_path = 'mappings.csv'
+
+# Read mappings from CSV
+mappings = read_mappings_from_csv(csv_file_path)
+
+# Assuming 'input_df' is already defined and contains a column 'Original Term'
+input_data = {'Original Term': ['this is a name of c', 'that is a name of c', 'this is']}
+input_df = pd.DataFrame(input_data)
+
+# Extract terms from 'input_df'
+terms = input_df['Original Term'].tolist()
+
+# Map the terms
+mapped_terms = map_terms(terms, mappings)
+
+# Create DataFrame
+data = []
+for original, mapped in mapped_terms:
+    unmapped_words = find_unmapped_words(mapped, mappings)
+    data.append([original, mapped, unmapped_words])
+
+df = pd.DataFrame(data, columns=['Original Term', 'Mapped Term', 'Unmapped Words'])
+
+import ace_tools as tools; tools.display_dataframe_to_user(name="Mapped Terms DataFrame", dataframe=df)
+
+print(df)
