@@ -9,6 +9,12 @@ mapping_data = {
 
 # Creating a DataFrame from the sample mapping data
 mapping_df = pd.DataFrame(mapping_data)
+# Remove duplicates
+mapping_df = mapping_df.drop_duplicates()
+
+# Sort the mapping dataframe by the length of 'original_term' in descending order
+mapping_df['length'] = mapping_df['original_term'].apply(len)
+mapping_df = mapping_df.sort_values(by='length', ascending=False).drop(columns=['length'])
 
 # Sample sentences
 sentences = ['this is a name of c', 'that is a name of c', 'this is', 'this is an example term', 'another example of a sample']
