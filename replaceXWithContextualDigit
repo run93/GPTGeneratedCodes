@@ -1,0 +1,28 @@
+function replaceXWithContextualDigit(inputString, sentence) {
+  const regex = /\d+/g;
+  const matches = sentence.match(regex);
+
+  if (!matches) {
+    return 'No digits found in the sentence';
+  }
+
+  // Define a function to determine the best match based on context
+  function findBestMatch(template, context) {
+    const words = context.split(' ');
+    for (const word of words) {
+      if (template.includes(word)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  for (const match of matches) {
+    const tempString = inputString.replace('X', match);
+    if (findBestMatch(tempString, sentence)) {
+      return tempString;
+    }
+  }
+
+  return inputString; // Return the original template if no match is found
+}
