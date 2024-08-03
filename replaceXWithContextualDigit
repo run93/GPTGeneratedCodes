@@ -7,19 +7,23 @@ function replaceX(columnA, columnB) {
         return columnB; // If columnB does not contain "X", return columnB directly
     }
 
-    // Handle specific cases for 90+ days and 1-29 DPD first
+    // Handle specific cases for 90+ days, 120+ DPD, and 1-29 DPD first
     if (/(\d+\+ days)/.test(columnA)) {
         const match = columnA.match(/(\d+)\+ days/);
         columnB = columnB.replace('XMoreDay', match[1] + 'MoreDay');
+    }
+    if (/(\d+\+ DPD)/.test(columnA)) {
+        const match = columnA.match(/(\d+)\+ DPD/);
+        columnB = columnB.replace('XPlus', match[1] + 'Plus');
     }
     if (/(\d+-\d+ DPD)/.test(columnA)) {
         const match = columnA.match(/(\d+)-(\d+) DPD/);
         columnB = columnB.replace('XDaysPastDue', match[1] + 'to' + match[2] + 'DaysPastDue');
     }
 
-    // Handle specific case for "1-29 day"
-    if (/(\d+-\d+ day)/.test(columnA)) {
-        const match = columnA.match(/(\d+)-(\d+) day/);
+    // Handle specific case for "1-29 days"
+    if (/(\d+-\d+ days)/.test(columnA)) {
+        const match = columnA.match(/(\d+)-(\d+) days/);
         columnB = columnB.replace('XDay', match[1] + 'to' + match[2] + 'Day');
     }
 
