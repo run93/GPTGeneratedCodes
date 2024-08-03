@@ -17,6 +17,12 @@ function replaceX(columnA, columnB) {
         columnB = columnB.replace('XDaysPastDue', match[1] + 'to' + match[2] + 'DaysPastDue');
     }
 
+    // Handle specific case for "1-29 day"
+    if (/(\d+-\d+ day)/.test(columnA)) {
+        const match = columnA.match(/(\d+)-(\d+) day/);
+        columnB = columnB.replace('XDay', match[1] + 'to' + match[2] + 'Day');
+    }
+
     // Specific placeholders for "first" and "last"
     const specificPlaceholders = [
         { placeholder: 'FirstXMinute', regex: /first (\d+) minutes?/ig },
