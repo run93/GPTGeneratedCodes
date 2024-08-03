@@ -7,42 +7,40 @@ function replaceX(columnA, columnB) {
         return columnB; // If columnB does not contain "X", return columnB directly
     }
 
-    // Handle specific cases for 90+ days, 120+ DPD, 1-29 DPD, and 1-29 days
-    if (/(\d+\+ days)/.test(columnA)) {
-        const match = columnA.match(/(\d+)\+ days/);
-        columnB = columnB.replace('XMoreDay', match[1] + 'MoreDay');
-    }
-    if (/(\d+\+ DPD)/.test(columnA)) {
-        const match = columnA.match(/(\d+)\+ DPD/);
-        columnB = columnB.replace('XPlus', match[1] + 'Plus');
-    }
-    if (/(\d+-\d+ DPD)/.test(columnA)) {
-        const match = columnA.match(/(\d+)-(\d+) DPD/);
-        columnB = columnB.replace('XDaysPastDue', match[1] + 'to' + match[2] + 'DaysPastDue');
-    }
-    if (/(\d+-\d+ days?)/.test(columnA)) {
-        const match = columnA.match(/(\d+)-(\d+) days?/);
-        columnB = columnB.replace('XDay', match[1] + 'to' + match[2] + 'Day');
-    }
-
-    // Specific placeholders for "first" and "last"
+    // Handle specific cases for "First" and "Last"
     const specificPlaceholders = [
-        { placeholder: 'FirstXMinute', regex: /first (\d+) minutes?/ig },
-        { placeholder: 'LastXMinute', regex: /last (\d+) minutes?/ig },
-        { placeholder: 'FirstXDay', regex: /first (\d+) days?/ig },
-        { placeholder: 'LastXDay', regex: /last (\d+) days?/ig }
+        { placeholder: 'FirstXMinute', regex: /first (\d+) minutes?/i },
+        { placeholder: 'LastXMinute', regex: /last (\d+) minutes?/i },
+        { placeholder: 'FirstXDay', regex: /first (\d+) days?/i },
+        { placeholder: 'LastXDay', regex: /last (\d+) days?/i },
+        { placeholder: 'LastXDays', regex: /last (\d+) days?/i }
     ];
 
     specificPlaceholders.forEach(({ placeholder, regex }) => {
         const match = columnA.match(regex);
         if (match) {
-            match.forEach(m => {
-                const numberPart = m.match(/\d+/)[0];
-                const specificReplacement = placeholder.replace('X', numberPart);
-                columnB = columnB.replace(new RegExp(placeholder, 'ig'), specificReplacement);
-            });
+            const numberPart = match[0].match(/\d+/)[0];
+            const specificReplacement = placeholder.replace('X', numberPart);
+            columnB = columnB.replace(placeholder, specificReplacement);
         }
     });
+
+    // Handle specific cases for "1-29 days"
+    if (/(\d+-\d+ days?)/.test(columnA)) {
+        const match = columnA.match(/(\d+)-(\d+) days?/);
+        if (match) {
+            columnB = columnB.replace('XDays', match[1] + 'to' + match[2] + 'Days');
+            columnB = columnB.replace('XDay', match[1] + 'to' + match[2] + 'Day');
+        }
+    }
+
+    // Handle specific cases for "120+ DPD"
+    if (/(\d+\+ DPD)/.test(columnA)) {
+        const match = columnA.match(/(\d+)\+ DPD/);
+        if (match) {
+            columnB = columnB.replace('XPlus', match[1] + 'Plus');
+        }
+    }
 
     // General placeholders
     const regex = /(\d+\s?(day|days|month|months|year|years|minute|minutes))/ig;
