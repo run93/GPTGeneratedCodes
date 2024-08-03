@@ -1,5 +1,12 @@
-
 function replaceX(columnA, columnB) {
+  if (!columnB) {
+    return ''; // If columnB is empty, return an empty string
+  }
+
+  if (!columnB.includes('X')) {
+    return columnB; // If columnB does not contain "X", return columnB directly
+  }
+
   const regex = /(\d+\s?(day|days|month|months|year|years|minute|minutes))/ig;
   const matches = columnA.match(regex);
 
