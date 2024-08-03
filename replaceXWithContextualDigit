@@ -50,6 +50,14 @@ function replaceX(columnA, columnB) {
         }
     }
 
+    // Handle specific cases for "1-29 DPD" and similar patterns
+    if (/(\d+-\d+ DPD)/.test(columnA)) {
+        const match = columnA.match(/(\d+)-(\d+) DPD/);
+        if (match) {
+            columnB = columnB.replace('XDaysPastDue', match[1] + 'to' + match[2] + 'DaysPastDue');
+        }
+    }
+
     // General placeholders
     const regex = /(\d+\s?(day|days|month|months|year|years|minute|minutes))/ig;
     const matches = columnA.match(regex);
