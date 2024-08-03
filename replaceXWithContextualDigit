@@ -13,7 +13,8 @@ function replaceX(columnA, columnB) {
         { placeholder: 'LastXMinute', regex: /last (\d+) minutes?/i },
         { placeholder: 'FirstXDay', regex: /first (\d+) days?/i },
         { placeholder: 'LastXDay', regex: /last (\d+) days?/i },
-        { placeholder: 'LastXDays', regex: /last (\d+) days?/i }
+        { placeholder: 'LastXDays', regex: /last (\d+) days?/i },
+        { placeholder: 'LastXHours', regex: /last (\d+) hours?/i }
     ];
 
     specificPlaceholders.forEach(({ placeholder, regex }) => {
@@ -42,6 +43,14 @@ function replaceX(columnA, columnB) {
         }
     }
 
+    // Handle specific cases for "30 or more days"
+    if (/(\d+) or more days/.test(columnA)) {
+        const match = columnA.match(/(\d+) or more days/);
+        if (match) {
+            columnB = columnB.replace('XMoreDays', match[1] + 'MoreDays');
+        }
+    }
+
     // Handle specific cases for "120+ DPD"
     if (/(\d+\+ DPD)/.test(columnA)) {
         const match = columnA.match(/(\d+)\+ DPD/);
@@ -59,7 +68,7 @@ function replaceX(columnA, columnB) {
     }
 
     // General placeholders
-    const regex = /(\d+\s?(day|days|month|months|year|years|minute|minutes))/ig;
+    const regex = /(\d+\s?(day|days|month|months|year|years|minute|minutes|hour|hours))/ig;
     const matches = columnA.match(regex);
 
     if (matches) {
