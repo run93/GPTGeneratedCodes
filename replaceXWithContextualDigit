@@ -21,7 +21,7 @@ function replaceX(columnA, columnB) {
         if (match) {
             const numberPart = match[0].match(/\d+/)[0];
             const specificReplacement = placeholder.replace('X', numberPart);
-            columnB = columnB.replace(placeholder, specificReplacement);
+            columnB = columnB.replace(new RegExp(placeholder, 'ig'), specificReplacement);
         }
     });
 
@@ -31,6 +31,14 @@ function replaceX(columnA, columnB) {
         if (match) {
             columnB = columnB.replace('XDays', match[1] + 'to' + match[2] + 'Days');
             columnB = columnB.replace('XDay', match[1] + 'to' + match[2] + 'Day');
+        }
+    }
+
+    // Handle specific cases for "90+ days"
+    if (/(\d+\+ days)/.test(columnA)) {
+        const match = columnA.match(/(\d+)\+ days/);
+        if (match) {
+            columnB = columnB.replace('XMoreDays', match[1] + 'MoreDays');
         }
     }
 
