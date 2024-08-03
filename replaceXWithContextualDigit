@@ -1,28 +1,17 @@
-function replaceXWithContextualDigit(inputString, sentence) {
-  const regex = /\d+/g;
-  const matches = sentence.match(regex);
 
-  if (!matches) {
-    return 'No digits found in the sentence';
-  }
+function replaceX(columnA, columnB) {
+  const regex = /(\d+\s?(day|days|month|months|year|years|minute|minutes))/ig;
+  const matches = columnA.match(regex);
 
-  // Define a function to determine the best match based on context
-  function findBestMatch(template, context) {
-    const words = context.split(' ');
-    for (const word of words) {
-      if (template.includes(word)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  for (const match of matches) {
-    const tempString = inputString.replace('X', match);
-    if (findBestMatch(tempString, sentence)) {
-      return tempString;
+  if (matches) {
+    for (let match of matches) {
+      let numberPart = match.match(/\d+/)[0];
+      let textPart = match.match(/[a-zA-Z]+/)[0];
+      
+      let placeholder = 'X' + textPart[0].toUpperCase() + textPart.slice(1).toLowerCase();
+      columnB = columnB.replace(placeholder, numberPart + textPart);
     }
   }
 
-  return inputString; // Return the original template if no match is found
+  return columnB;
 }
