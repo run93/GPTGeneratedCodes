@@ -1,24 +1,60 @@
 function replaceX(columnA, columnB) {
-  if (!columnB) {
-    return ''; // If columnB is empty, return an empty string
-  }
-
-  if (!columnB.includes('X')) {
-    return columnB; // If columnB does not contain "X", return columnB directly
-  }
-
-  const regex = /(\d+\s?(day|days|month|months|year|years|minute|minutes))/ig;
-  const matches = columnA.match(regex);
-
-  if (matches) {
-    for (let match of matches) {
-      let numberPart = match.match(/\d+/)[0];
-      let textPart = match.match(/[a-zA-Z]+/)[0];
-      
-      let placeholder = 'X' + textPart[0].toUpperCase() + textPart.slice(1).toLowerCase();
-      columnB = columnB.replace(placeholder, numberPart + textPart);
+    if (!columnB) {
+        return ''; // If columnB is empty, return an empty string
     }
-  }
 
-  return columnB;
+    if (!columnB.includes('X')) {
+        return columnB; // If columnB does not contain "X", return columnB directly
+    }
+
+    // Handle specific cases for 90+ days and 1-29 DPD first
+    if (/(\d+\+ days)/.test(columnA)) {
+        const match = columnA.match(/(\d+)\+ days/);
+        columnB = columnB.replace('XMoreDay', match[1] + 'MoreDay');
+    }
+    if (/(\d+-\d+ DPD)/.test(columnA)) {
+        const match = columnA.match(/(\d+)-(\d+) DPD/);
+        columnB = columnB.replace('XDaysPastDue', match[1] + 'to' + match[2] + 'DaysPastDue');
+    }
+
+    // Specific placeholders for "first" and "last"
+    const specificPlaceholders = [
+        { placeholder: 'FirstXMinute', regex: /first (\d+) minutes?/ig },
+        { placeholder: 'LastXMinute', regex: /last (\d+) minutes?/ig },
+        { placeholder: 'FirstXDay', regex: /first (\d+) days?/ig },
+        { placeholder: 'LastXDay', regex: /last (\d+) days?/ig }
+    ];
+
+    specificPlaceholders.forEach(({ placeholder, regex }) => {
+        const match = columnA.match(regex);
+        if (match) {
+            match.forEach(m => {
+                const numberPart = m.match(/\d+/)[0];
+                const specificReplacement = placeholder.replace('X', numberPart);
+                columnB = columnB.replace(new RegExp(placeholder, 'ig'), specificReplacement);
+            });
+        }
+    });
+
+    // General placeholders
+    const regex = /(\d+\s?(day|days|month|months|year|years|minute|minutes))/ig;
+    const matches = columnA.match(regex);
+
+    if (matches) {
+        let replacements = {};
+        for (let match of matches) {
+            let numberPart = match.match(/\d+/)[0];
+            let textPart = match.match(/[a-zA-Z]+/)[0];
+            let placeholder = 'X' + textPart[0].toUpperCase() + textPart.slice(1).toLowerCase();
+            replacements[placeholder] = numberPart + textPart;
+        }
+
+        for (let placeholder in replacements) {
+            while (columnB.includes(placeholder)) {
+                columnB = columnB.replace(placeholder, replacements[placeholder]);
+            }
+        }
+    }
+
+    return columnB;
 }
