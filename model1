@@ -1,2 +1,4 @@
 =IF(REGEXMATCH(A1, "\bLast\w*"), REGEXEXTRACT(A1, "\bLast\w*"), "")
 =IF(B1 <> "", TEXTJOIN(" ", TRUE, FILTER(SPLIT(A1, " "), SPLIT(A1, " ") <> B1)), A1)
+=IF(AND(B1 <> "", LEN(A1) > LEN(B1)), TEXTJOIN(" ", TRUE, FILTER(SPLIT(A1, " "), SPLIT(A1, " ") <> B1)), "")
+
