@@ -1,0 +1,119 @@
+# Install required packages if not already installed
+# pip install sentence-transformers torch pandas
+
+import random
+import pandas as pd
+from sentence_transformers import SentenceTransformer, InputExample, losses
+from torch.utils.data import DataLoader
+
+# ------------------------------
+# Step 1: Generate Sentence Pairs
+# ------------------------------
+
+# Sample dataset with names, descriptions, and elements
+data = [
+    {"Dataset Name": "Revenue Data 2023", "Dataset Description": "Contains company revenue information for the year 2023.", "Elements": ["Revenue", "Expenses", "Profit"]},
+    {"Dataset Name": "Employee Records", "Dataset Description": "Details of employee information including salaries and positions.", "Elements": ["Employee ID", "Name", "Salary", "Position"]},
+    {"Dataset Name": "Market Analysis Report", "Dataset Description": "Analyzes market trends, consumer behavior, and sales forecasts.", "Elements": ["Trends", "Consumer Behavior", "Sales Forecasts"]},
+]
+
+# Function to assign similarity scores based on pair type
+def similarity_score(pair_type):
+    if pair_type == "positive_high":
+        return round(random.uniform(0.9, 1.0), 2)
+    elif pair_type == "positive_moderate":
+        return round(random.uniform(0.7, 0.9), 2)
+    elif pair_type == "negative":
+        return round(random.uniform(0.0, 0.3), 2)
+    return 0.5
+
+# Generate sentence pairs with similarity scores
+pairs = []
+
+for i, entry in enumerate(data):
+    name, description, elements = entry["Dataset Name"], entry["Dataset Description"], entry["Elements"]
+
+    # 1. Name-Description (High Similarity)
+    pairs.append((name, description, similarity_score("positive_high")))
+
+    # 2. Name-Elements (Moderate Similarity)
+    for element in elements:
+        pairs.append((name, element, similarity_score("positive_moderate")))
+
+    # 3. Description-Elements (High Similarity)
+    for element in elements:
+        pairs.append((description, element, similarity_score("positive_high")))
+
+    # 4. Intra-Element Pairs (Within the same dataset)
+    for j, element1 in enumerate(elements):
+        for k, element2 in enumerate(elements):
+            if j < k:
+                pairs.append((element1, element2, similarity_score("positive_moderate")))
+
+# 5. Cross-Dataset Negative Pairs
+for i, entry1 in enumerate(data):
+    for j, entry2 in enumerate(data):
+        if i != j:
+            pairs.append((entry1["Dataset Name"], entry2["Dataset Description"], similarity_score("negative")))
+
+# Save pairs to DataFrame and CSV (optional)
+df = pd.DataFrame(pairs, columns=["Sentence1", "Sentence2", "Similarity"])
+df.to_csv("generated_sentence_pairs.csv", index=False)
+print("Generated sentence pairs saved to 'generated_sentence_pairs.csv'.")
+
+# ------------------------------
+# Step 2: Fine-Tune SentenceTransformer
+# ------------------------------
+
+# Convert DataFrame rows into InputExample format
+train_examples = [InputExample(texts=[row['Sentence1'], row['Sentence2']], label=row['Similarity']) for _, row in df.iterrows()]
+
+# Create DataLoader for batching
+train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=8)
+
+# Load the baseline MiniLM-L6-v2 model
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# Use CosineSimilarityLoss for similarity learning
+train_loss = losses.CosineSimilarityLoss(model=model)
+
+# Fine-tune the model
+print("Starting fine-tuning...")
+model.fit(
+    train_objectives=[(train_dataloader, train_loss)],
+    epochs=2,  # Increase epochs for better performance
+    warmup_steps=50,
+    show_progress_bar=True
+)
+print("Fine-tuning completed!")
+
+# Save the fine-tuned model
+model_save_path = "fine-tuned-financial-sentence-transformer"
+model.save(model_save_path)
+print(f"Model saved to '{model_save_path}'.")
+
+# ------------------------------
+# Step 3: Testing the Fine-Tuned Model
+# ------------------------------
+
+# Load the fine-tuned model for inference
+fine_tuned_model = SentenceTransformer(model_save_path)
+
+# Example inference
+test_sentences = [
+    "Revenue data for 2023.",
+    "Information about company earnings.",
+    "Employee salary details.",
+    "Forecast of market trends.",
+]
+
+# Generate embeddings and calculate similarity between pairs
+embeddings = fine_tuned_model.encode(test_sentences)
+
+from sentence_transformers import util
+
+print("\nSimilarity between test sentences:")
+for i in range(len(test_sentences)):
+    for j in range(i + 1, len(test_sentences)):
+        similarity = util.cos_sim(embeddings[i], embeddings[j]).item()
+        print(f"Similarity between '{test_sentences[i]}' and '{test_sentences[j]}': {similarity:.4f}")
