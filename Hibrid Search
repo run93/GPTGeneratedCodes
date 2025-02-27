@@ -1,12 +1,11 @@
-# Install required libraries
-# pip install rank_bm25 sentence-transformers torch
-
+import pandas as pd
 import torch
 from sentence_transformers import SentenceTransformer, util
 from rank_bm25 import BM25Okapi
 from nltk.tokenize import word_tokenize
 import nltk
 
+# Download NLTK tokenizer
 nltk.download('punkt')
 
 # ------------------------------
@@ -21,7 +20,11 @@ corpus = [
     "Market trends show a positive outlook for the next quarter.",
 ]
 
-query = "quarterly financial earnings"
+queries = [
+    "quarterly financial earnings",
+    "employee salary information",
+    "market trends for next quarter"
+]
 
 # ------------------------------
 # Step 2: BM25 Sparse Retrieval
@@ -31,10 +34,6 @@ query = "quarterly financial earnings"
 tokenized_corpus = [word_tokenize(doc.lower()) for doc in corpus]
 bm25 = BM25Okapi(tokenized_corpus)
 
-# BM25 scores
-bm25_scores = bm25.get_scores(word_tokenize(query.lower()))
-print("BM25 Scores:", bm25_scores)
-
 # ------------------------------
 # Step 3: MiniLM Dense Retrieval
 # ------------------------------
@@ -42,32 +41,47 @@ print("BM25 Scores:", bm25_scores)
 # Load MiniLM model and generate embeddings
 model = SentenceTransformer('all-MiniLM-L6-v2')
 corpus_embeddings = model.encode(corpus, convert_to_tensor=True)
-query_embedding = model.encode(query, convert_to_tensor=True)
-
-# Dense similarity scores (cosine similarity)
-dense_scores = util.cos_sim(query_embedding, corpus_embeddings).squeeze().cpu().numpy()
-print("Dense (MiniLM) Scores:", dense_scores)
 
 # ------------------------------
-# Step 4: Combine Scores for Hybrid Retrieval
+# Step 4: Compute Scores for Each Query and Store Results
 # ------------------------------
 
-def hybrid_score(bm25_score, dense_score, alpha=0.5):
-    """Linear combination of BM25 and dense scores."""
-    return alpha * bm25_score + (1 - alpha) * dense_score
+results = []
+alpha = 0.6  # Weight towards BM25 (adjustable)
 
-alpha = 0.6  # Weight towards BM25
-combined_scores = [hybrid_score(b, d, alpha) for b, d in zip(bm25_scores, dense_scores)]
+for query in queries:
+    tokenized_query = word_tokenize(query.lower())
+    
+    # Compute BM25 scores
+    bm25_scores = bm25.get_scores(tokenized_query)
+    
+    # Compute dense embeddings and cosine similarity
+    query_embedding = model.encode(query, convert_to_tensor=True)
+    dense_scores = util.cos_sim(query_embedding, corpus_embeddings).squeeze().cpu().numpy()
+    
+    # Compute hybrid scores
+    hybrid_scores = [alpha * bm25_score + (1 - alpha) * dense_score for bm25_score, dense_score in zip(bm25_scores, dense_scores)]
+    
+    # Rank documents by combined scores
+    ranked_results = sorted(
+        zip(corpus, bm25_scores, dense_scores, hybrid_scores),
+        key=lambda x: x[3], reverse=True  # Sort by hybrid score
+    )[:5]  # Get Top 5 results
+    
+    # Store results in dataframe format
+    for rank, (doc, bm25_score, dense_score, hybrid_score) in enumerate(ranked_results, 1):
+        results.append({
+            "Query": query,
+            "Rank": rank,
+            "Document": doc,
+            "BM25 Score": round(bm25_score, 4),
+            "Dense Score": round(dense_score, 4),
+            "Hybrid Score": round(hybrid_score, 4)
+        })
 
-# ------------------------------
-# Step 5: Display Ranked Results
-# ------------------------------
+# Convert results to DataFrame and save
+df_results = pd.DataFrame(results)
+df_results.to_csv("hybrid_retrieval_results.csv", index=False)
 
-# Rank documents by scores
-results = sorted(zip(corpus, bm25_scores, dense_scores, combined_scores), key=lambda x: x[3], reverse=True)
-
-print("\n🔎 Hybrid Retrieval Results:")
-for rank, (doc, bm25_score, dense_score, combined_score) in enumerate(results, 1):
-    print(f"\nRank {rank}:")
-    print(f"Document: {doc}")
-    print(f"BM25 Score: {bm25_score:.4f}, Dense Score: {dense_score:.4f}, Combined: {combined_score:.4f}")
+print("\n✅ Hybrid Retrieval Results Saved as 'hybrid_retrieval_results.csv'")
+print(df_results.head(10))  # Display first 10 results
