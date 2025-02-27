@@ -85,3 +85,120 @@ df_results.to_csv("hybrid_retrieval_results.csv", index=False)
 
 print("\n✅ Hybrid Retrieval Results Saved as 'hybrid_retrieval_results.csv'")
 print(df_results.head(10))  # Display first 10 results
+
+
+
+
+
+
+
+
+def dense_to_sparse_topk(embedding, k=10):
+    """
+    Convert dense embeddings to sparse by keeping only top-k values.
+    """
+    sparse_embedding = embedding.clone()
+    topk_indices = torch.topk(sparse_embedding, k).indices
+    mask = torch.ones_like(sparse_embedding, dtype=torch.bool)
+    mask[topk_indices] = False
+    sparse_embedding[mask] = 0
+    return sparse_embedding
+
+# Example usage
+sentence = "Quarterly earnings report"
+model = SentenceTransformer("all-MiniLM-L6-v2")
+dense_embedding = model.encode(sentence, convert_to_tensor=True)
+sparse_embedding = dense_to_sparse_topk(dense_embedding, k=10)
+print(f"Sparse Embedding: {sparse_embedding}")
+
+
+
+
+
+
+
+import torch
+from sentence_transformers import SentenceTransformer, util
+import pandas as pd
+
+# ------------------------------
+# Step 1: Load MiniLM (Dense) and Sparse MiniLM
+# ------------------------------
+
+# Load the base dense model (MiniLM)
+dense_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Load the sparse model (we use SPLADE as an example of sparse MiniLM)
+sparse_model = SentenceTransformer("naver/splade-cocondenser-ensembledistil")
+
+# Example corpus
+corpus = [
+    "The company reported strong quarterly earnings.",
+    "Annual financial results were released today.",
+    "Revenue increased by 10% in the last quarter.",
+    "Employee records and salary details are confidential.",
+    "Market trends show a positive outlook for the next quarter.",
+]
+
+queries = [
+    "quarterly financial earnings",
+    "employee salary information",
+    "market trends for next quarter"
+]
+
+# Compute corpus embeddings for both dense and sparse models
+corpus_dense_embeddings = dense_model.encode(corpus, convert_to_tensor=True)
+corpus_sparse_embeddings = sparse_model.encode(corpus, convert_to_tensor=True)
+
+# ------------------------------
+# Step 2: Define Hybrid Function (Dense + Sparse)
+# ------------------------------
+
+def hybrid_score(dense_score, sparse_score, alpha=0.5):
+    """Hybrid score using weighted sum of dense and sparse scores."""
+    return alpha * sparse_score + (1 - alpha) * dense_score
+
+# ------------------------------
+# Step 3: Compute Scores for Each Query and Store Results
+# ------------------------------
+
+results = []
+alpha = 0.6  # Weight for sparse model (adjustable)
+
+for query in queries:
+    # Compute dense and sparse embeddings for the query
+    query_dense_embedding = dense_model.encode(query, convert_to_tensor=True)
+    query_sparse_embedding = sparse_model.encode(query, convert_to_tensor=True)
+
+    # Compute cosine similarity for dense embeddings
+    dense_scores = util.cos_sim(query_dense_embedding, corpus_dense_embeddings).squeeze().cpu().numpy()
+
+    # Compute dot product for sparse embeddings (mimicking term-weighting approaches)
+    sparse_scores = torch.matmul(query_sparse_embedding, corpus_sparse_embeddings.T).squeeze().cpu().numpy()
+
+    # Compute hybrid scores
+    hybrid_scores = [hybrid_score(d, s, alpha) for d, s in zip(dense_scores, sparse_scores)]
+
+    # Rank documents by hybrid score
+    ranked_results = sorted(
+        zip(corpus, sparse_scores, dense_scores, hybrid_scores),
+        key=lambda x: x[3], reverse=True  # Sort by hybrid score
+    )[:5]  # Get Top 5 results
+
+    # Store results in DataFrame format
+    for rank, (doc, sparse_score, dense_score, hybrid_score) in enumerate(ranked_results, 1):
+        results.append({
+            "Query": query,
+            "Rank": rank,
+            "Document": doc,
+            "Sparse Score": round(sparse_score, 4),
+            "Dense Score": round(dense_score, 4),
+            "Hybrid Score": round(hybrid_score, 4)
+        })
+
+# Convert results to DataFrame and save
+df_results = pd.DataFrame(results)
+df_results.to_csv("hybrid_sparse_dense_results.csv", index=False)
+
+print("\n✅ Hybrid Retrieval Results Saved as 'hybrid_sparse_dense_results.csv'")
+print(df_results.head(10))  # Display first 10 results
