@@ -161,7 +161,7 @@ corpus_sparse_embeddings = torch.stack([dense_to_sparse_topk(embedding, k=10) fo
 # Step 2: Define Hybrid Function (Dense + Sparse)
 # ------------------------------
 
-def hybrid_score(dense_score, sparse_score, alpha=0.5):
+def compute_hybrid_score(dense_score, sparse_score, alpha=0.5):
     """Hybrid score using weighted sum of dense and sparse scores."""
     return alpha * sparse_score + (1 - alpha) * dense_score
 
@@ -184,7 +184,7 @@ for query in queries:
     sparse_scores = torch.matmul(query_sparse_embedding, corpus_sparse_embeddings.T).squeeze().cpu().numpy()
 
     # Compute hybrid scores
-    hybrid_scores = [hybrid_score(d, s, alpha) for d, s in zip(dense_scores, sparse_scores)]
+    hybrid_scores = [compute_hybrid_score(d, s, alpha) for d, s in zip(dense_scores, sparse_scores)]
 
     # Rank documents by hybrid score
     ranked_results = sorted(
@@ -198,14 +198,11 @@ for query in queries:
             "Query": query,
             "Rank": rank,
             "Document": doc,
-            "Sparse Score": round(sparse_score, 4),
-            "Dense Score": round(dense_score, 4),
-            "Hybrid Score": round(hybrid_score, 4)
+            "Sparse Score": round(float(sparse_score), 4),
+            "Dense Score": round(float(dense_score), 4),
+            "Hybrid Score": round(float(hybrid_score), 4)
         })
 
-# Convert results to DataFrame and save
+# Convert results to DataFrame and display
 df_results = pd.DataFrame(results)
-df_results.to_csv("hybrid_sparse_dense_results.csv", index=False)
-
-print("\n✅ Hybrid Retrieval Results Saved as 'hybrid_sparse_dense_results.csv'")
-print(df_results.head(10))  # Display first 10 results
+import ace_tools as tools; tools.display_dataframe_to_user(name="Top 5 Hybrid Retrieval Results (Dense + Sparse MiniLM)", dataframe=df_results)
