@@ -116,20 +116,27 @@ print(f"Sparse Embedding: {sparse_embedding}")
 
 
 
-
 import torch
 from sentence_transformers import SentenceTransformer, util
 import pandas as pd
 
 # ------------------------------
-# Step 1: Load MiniLM (Dense) and Sparse MiniLM
+# Step 1: Load MiniLM (Dense) and Convert It to Sparse
 # ------------------------------
 
 # Load the base dense model (MiniLM)
 dense_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# Load the sparse model (we use SPLADE as an example of sparse MiniLM)
-sparse_model = SentenceTransformer("naver/splade-cocondenser-ensembledistil")
+def dense_to_sparse_topk(embedding, k=10):
+    """
+    Convert dense embeddings to sparse by keeping only top-k values.
+    """
+    sparse_embedding = embedding.clone()
+    topk_indices = torch.topk(sparse_embedding, k).indices
+    mask = torch.ones_like(sparse_embedding, dtype=torch.bool)
+    mask[topk_indices] = False
+    sparse_embedding[mask] = 0
+    return sparse_embedding
 
 # Example corpus
 corpus = [
@@ -146,9 +153,9 @@ queries = [
     "market trends for next quarter"
 ]
 
-# Compute corpus embeddings for both dense and sparse models
+# Compute corpus embeddings (Dense + Converted Sparse)
 corpus_dense_embeddings = dense_model.encode(corpus, convert_to_tensor=True)
-corpus_sparse_embeddings = sparse_model.encode(corpus, convert_to_tensor=True)
+corpus_sparse_embeddings = torch.stack([dense_to_sparse_topk(embedding, k=10) for embedding in corpus_dense_embeddings])
 
 # ------------------------------
 # Step 2: Define Hybrid Function (Dense + Sparse)
@@ -168,7 +175,7 @@ alpha = 0.6  # Weight for sparse model (adjustable)
 for query in queries:
     # Compute dense and sparse embeddings for the query
     query_dense_embedding = dense_model.encode(query, convert_to_tensor=True)
-    query_sparse_embedding = sparse_model.encode(query, convert_to_tensor=True)
+    query_sparse_embedding = dense_to_sparse_topk(query_dense_embedding, k=10)
 
     # Compute cosine similarity for dense embeddings
     dense_scores = util.cos_sim(query_dense_embedding, corpus_dense_embeddings).squeeze().cpu().numpy()
