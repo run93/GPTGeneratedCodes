@@ -1,0 +1,73 @@
+# Install required libraries
+# pip install rank_bm25 sentence-transformers torch
+
+import torch
+from sentence_transformers import SentenceTransformer, util
+from rank_bm25 import BM25Okapi
+from nltk.tokenize import word_tokenize
+import nltk
+
+nltk.download('punkt')
+
+# ------------------------------
+# Step 1: Setup Data
+# ------------------------------
+
+corpus = [
+    "The company reported strong quarterly earnings.",
+    "Annual financial results were released today.",
+    "Revenue increased by 10% in the last quarter.",
+    "Employee records and salary details are confidential.",
+    "Market trends show a positive outlook for the next quarter.",
+]
+
+query = "quarterly financial earnings"
+
+# ------------------------------
+# Step 2: BM25 Sparse Retrieval
+# ------------------------------
+
+# Tokenize the corpus for BM25
+tokenized_corpus = [word_tokenize(doc.lower()) for doc in corpus]
+bm25 = BM25Okapi(tokenized_corpus)
+
+# BM25 scores
+bm25_scores = bm25.get_scores(word_tokenize(query.lower()))
+print("BM25 Scores:", bm25_scores)
+
+# ------------------------------
+# Step 3: MiniLM Dense Retrieval
+# ------------------------------
+
+# Load MiniLM model and generate embeddings
+model = SentenceTransformer('all-MiniLM-L6-v2')
+corpus_embeddings = model.encode(corpus, convert_to_tensor=True)
+query_embedding = model.encode(query, convert_to_tensor=True)
+
+# Dense similarity scores (cosine similarity)
+dense_scores = util.cos_sim(query_embedding, corpus_embeddings).squeeze().cpu().numpy()
+print("Dense (MiniLM) Scores:", dense_scores)
+
+# ------------------------------
+# Step 4: Combine Scores for Hybrid Retrieval
+# ------------------------------
+
+def hybrid_score(bm25_score, dense_score, alpha=0.5):
+    """Linear combination of BM25 and dense scores."""
+    return alpha * bm25_score + (1 - alpha) * dense_score
+
+alpha = 0.6  # Weight towards BM25
+combined_scores = [hybrid_score(b, d, alpha) for b, d in zip(bm25_scores, dense_scores)]
+
+# ------------------------------
+# Step 5: Display Ranked Results
+# ------------------------------
+
+# Rank documents by scores
+results = sorted(zip(corpus, bm25_scores, dense_scores, combined_scores), key=lambda x: x[3], reverse=True)
+
+print("\n🔎 Hybrid Retrieval Results:")
+for rank, (doc, bm25_score, dense_score, combined_score) in enumerate(results, 1):
+    print(f"\nRank {rank}:")
+    print(f"Document: {doc}")
+    print(f"BM25 Score: {bm25_score:.4f}, Dense Score: {dense_score:.4f}, Combined: {combined_score:.4f}")
