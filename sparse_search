@@ -1,0 +1,47 @@
+import torch
+from transformers import AutoTokenizer, AutoModelForMaskedLM
+import torch.nn.functional as F
+
+# Load the tokenizer and model
+model_name = "opensearch-project/opensearch-neural-sparse-encoding-doc-v2-distill"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForMaskedLM.from_pretrained(model_name)
+model.eval()
+
+def encode_document(text):
+    with torch.no_grad():
+        # Tokenize input text
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+        # Obtain model outputs
+        outputs = model(**inputs).logits.squeeze(0)  # Shape: [seq_len, vocab_size]
+        # Apply ReLU activation to ensure non-negative values
+        relu_outputs = F.relu(outputs)
+        # Aggregate maximum values across the sequence length dimension
+        sparse_vector = torch.max(relu_outputs, dim=0).values  # Shape: [vocab_size]
+        # Apply logarithmic scaling
+        sparse_vector = torch.log1p(sparse_vector)
+        # Zero out special token indices
+        special_token_ids = tokenizer.all_special_ids
+        sparse_vector[special_token_ids] = 0
+        return sparse_vector
+
+def compute_similarity(vec1, vec2):
+    return torch.dot(vec1, vec2).item()
+
+
+# Sample documents
+doc1 = "OpenSearch is a highly scalable search and analytics engine."
+doc2 = "Elasticsearch and OpenSearch are used for full-text search."
+doc3 = "The weather today is sunny with clear skies."
+
+# Encode the documents
+vec1 = encode_document(doc1)
+vec2 = encode_document(doc2)
+vec3 = encode_document(doc3)
+
+# Compute similarities
+similarity_12 = compute_similarity(vec1, vec2)
+similarity_13 = compute_similarity(vec1, vec3)
+
+print(f"Similarity between doc1 and doc2: {similarity_12:.4f}")
+print(f"Similarity between doc1 and doc3: {similarity_13:.4f}")
