@@ -1,0 +1,161 @@
+import json
+import networkx as nx
+from langchain.schema import Document
+from langchain.llms import Llama
+from langchain.embeddings import LlamaEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+
+# 1. Sample documents defined inline
+raw_docs = [
+    Document(
+        page_content="""
+1 Introduction
+Welcome to Document 1. In this section we explain the purpose and scope of the file.
+
+2 Installation
+This section details how to install the required software and dependencies.
+
+3 Usage
+Here we show basic usage examples, including command-line flags and configuration.
+
+4 Troubleshooting
+Common errors and their fixes are described in this section.
+""",
+        metadata={"doc_id": "DOC001", "doc_title": "Getting Started"}
+    ),
+    Document(
+        page_content="""
+1 Executive Summary
+A high-level overview of the key findings from our data analysis.
+
+2 Data Collection
+Description of sources, methods, and tools used to gather raw data.
+
+3 Analysis Methods
+Statistical and machine-learning techniques applied to cleanse and model the data.
+
+4 Conclusions & Next Steps
+Interpretation of results and recommendations for further investigation.
+""",
+        metadata={"doc_id": "DOC002", "doc_title": "Data Analysis Report"}
+    ),
+    Document(
+        page_content="""
+1 Authentication
+How clients should authenticate when calling our API endpoints.
+
+2 Endpoints Overview
+List of available endpoints, HTTP methods, and brief descriptions.
+
+3 Request & Response Formats
+Schema definitions, example JSON payloads, and HTTP status codes.
+
+4 Error Handling
+Error categories, response formats for failures, and retry guidance.
+""",
+        metadata={"doc_id": "DOC003", "doc_title": "API Reference"}
+    )
+]
+
+# 2. Split each document into sections via LLM
+llm_split = Llama(model_path="/path/to/llama3-8b.bin", n_threads=8)
+prompt_split = PromptTemplate(
+    input_variables=["doc_id", "doc_title", "content"],
+    template=(
+        "You are given a document with ID {doc_id} and title \"{doc_title}\". "
+        "Split the document into its logical sections. For each section, identify the section number (section_id), "
+        "the section title (section_title), and the section content. "
+        "Output a JSON array of objects like {section_id, section_title, content}. "
+        "Do not include any additional keys.\n"
+        "Document content:\n```{content}```"
+    )
+)
+chunks = []
+for doc in raw_docs:
+    # feed full content (short docs) to LLM
+    response = llm_split(prompt_split.format(
+        doc_id=doc.metadata['doc_id'],
+        doc_title=doc.metadata['doc_title'],
+        content=doc.page_content
+    ))
+    sections = json.loads(response)
+    for sec in sections:
+        chunks.append(Document(
+            page_content=sec['content'],
+            metadata={
+                'doc_id': doc.metadata['doc_id'],
+                'doc_title': doc.metadata['doc_title'],
+                'section_id': sec['section_id'],
+                'section_title': sec['section_title']
+            }
+        ))
+
+# 3. Build a simple section graph for demonstration
+G = nx.DiGraph()
+for c in chunks:
+    key = f"{c.metadata['doc_id']}::{c.metadata['section_id']}"
+    G.add_node(key, title=c.metadata['section_title'])
+# Example edges
+G.add_edge("DOC001::2", "DOC001::1", relation="prerequisite")
+G.add_edge("DOC002::4", "DOC002::3", relation="builds_on")
+G.add_edge("DOC003::2", "DOC003::1", relation="requires_auth")
+
+# --- Setup for Graph-RAG ---
+# 4. Create embeddings for each section node
+embed_model = LlamaEmbeddings(model_path="/path/to/llama3-8b.bin")
+section_texts = [
+    f"{d.metadata['doc_id']}::{d.metadata['section_id']} - {d.metadata['section_title']}\n{d.page_content}"
+    for d in chunks
+]
+vector_store = FAISS.from_texts(
+    section_texts,
+    embed_model,
+    metadatas=[d.metadata for d in chunks]
+)
+
+# 5. Graph-augmented retrieval function
+def graph_rag(query: str, top_k: int = 3, hops: int = 1) -> str:
+    # a. Retrieve top-k relevant sections by embedding
+    query_emb = embed_model.embed_query(query)
+    docs = vector_store.similarity_search_by_vector(query_emb, k=top_k)
+
+    # b. Expand via graph hops
+    extra = []
+    for doc in docs:
+        node = f"{doc.metadata['doc_id']}::{doc.metadata['section_id']}"
+        if node in G:
+            nbrs = {node}
+            for _ in range(hops):
+                new_n = set()
+                for n in nbrs:
+                    new_n |= set(G.predecessors(n))
+                    new_n |= set(G.successors(n))
+                nbrs |= new_n
+            for n in nbrs:
+                doc_id, sec_id = n.split("::")
+                for c in chunks:
+                    if c.metadata['doc_id']==doc_id and c.metadata['section_id']==sec_id:
+                        extra.append(c)
+    all_docs = {f"{d.metadata['doc_id']}::{d.metadata['section_id']}": d for d in docs+extra}.values()
+
+    # c. Build context
+    context = "\n---\n".join([
+        f"[{d.metadata['doc_id']}::{d.metadata['section_id']}] {d.metadata['section_title']}:\n{d.page_content}"
+        for d in all_docs
+    ])
+
+    # d. Query LLM with context
+    rag_prompt = PromptTemplate(
+        input_variables=["context","query"],
+        template=("You are an expert assistant. Use the context to answer:\n{context}\n---\nQ: {query}\nA:")
+    )
+    chain = LLMChain(llm=Llama(model_path="/path/to/llama3-8b.bin", n_threads=8), prompt=rag_prompt)
+    return chain.run({"context": context, "query": query})
+
+# 6. Demo
+if __name__ == '__main__':
+    print(graph_rag("How do I install the software?", top_k=1, hops=1))
+    print(graph_rag("What authentication steps are needed?", top_k=1, hops=2))
+    print(graph_rag("Summarize conclusions.", top_k=1, hops=3))
