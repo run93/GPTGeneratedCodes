@@ -2,7 +2,7 @@
 
 ---
 
-## Role of Foundational Models in AI
+## Role of Foundational Models in AI #1min
 
 * **Large Language Models (LLMs)** and **Large Image Models (LIMs)** serve as core reasoning and perception engines in contemporary AI Agents.
 * These models enable intelligent interaction with environments and complex reasoning tasks beyond hard-coded automation.
