@@ -1,4 +1,4 @@
-# AI Agents & Agentic AI: Evolution, Applications, and Future
+# AI Agents & Agentic AI: Evolution, Applications, and Future #1min
 
 ---
 
@@ -12,13 +12,13 @@
 
 ---
 
-## Generative AI as a Precursor
+## Generative AI as a Precursor #1.5min
 
-* **Generative AI systems**, primarily based on LLMs, operate reactively and lack autonomous goal pursuit, serving as precursors to more advanced AI Agents.
+* **Generative AI systems**, primarily based on LLMs, operate reactively and lack autonomous goal pursuit, **serving as precursors** to more advanced AI Agents.
 * The limitations of generative models led to the development of tool-augmented systems that bridge the gap between passive response generation and active task completion.
     * Generative models are input-driven and lack internal states.
-    * They produce diverse outputs but cannot manipulate tools independently.
-    * **Tool-augmented AI Agents** integrate external tools for real-time information access and task execution.
+    * They produce diverse outputs but **cannot manipulate tools independently**.
+    * Tool-augmented AI Agents integrate external tools for **real-time information access** and task execution.
 
 ---
 
