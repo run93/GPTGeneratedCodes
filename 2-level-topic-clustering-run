@@ -1,0 +1,185 @@
+2-level-topic-clustering
+
+# Generate 10,000 synthetic dataset names, descriptions, and 5 random column names each
+import random, json
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+random.seed(42)
+np.random.seed(42)
+
+N = 10_000
+
+domains = {
+    "Fraud Detection": [
+        "ATM transactions", "credit card disputes", "account takeover alerts",
+        "application verification", "chargeback monitoring", "merchant risk scoring",
+        "AML surveillance", "synthetic identity", "card-not-present anomalies"
+    ],
+    "Payments": [
+        "payment authorizations", "settlement batches", "refund requests",
+        "POS transactions", "cross-border remittances", "payout schedules"
+    ],
+    "Banking": [
+        "loan applications", "wire transfers", "ACH entries",
+        "savings accounts", "mortgage servicing", "KYC onboarding"
+    ],
+    "Healthcare": [
+        "claims processing", "EHR encounters", "lab results",
+        "diagnosis coding", "provider networks", "pharmacy fills"
+    ],
+    "E-commerce": [
+        "orders and returns", "product catalog", "clickstream events",
+        "customer support tickets", "cart abandonment", "promotion redemptions"
+    ],
+    "Social Media": [
+        "posts and comments", "ad impressions", "user growth",
+        "spam reports", "content moderation", "creator payouts"
+    ],
+    "IoT Sensors": [
+        "temperature readings", "device heartbeats", "vibration metrics",
+        "air quality", "power usage", "vehicle telematics"
+    ],
+    "Cybersecurity": [
+        "login attempts", "network flows", "endpoint alerts",
+        "vulnerability scans", "malware detections", "DLP incidents"
+    ],
+    "Marketing": [
+        "campaign performance", "lead funnel", "email outreach",
+        "organic search", "paid search", "social engagement"
+    ],
+    "Logistics": [
+        "shipment tracking", "fleet telemetry", "warehouse scans",
+        "last-mile delivery", "inventory turns", "carrier invoices"
+    ],
+    "HR": [
+        "applicant tracking", "payroll runs", "performance reviews",
+        "benefits enrollment", "time and attendance", "training records"
+    ],
+    "Real Estate": [
+        "listings feed", "closing records", "rent collection",
+        "maintenance requests", "occupancy rates", "valuation comps"
+    ],
+    "Energy": [
+        "grid load", "solar generation", "smart meter",
+        "outage tickets", "substation telemetry", "billing cycles"
+    ],
+    "Education": [
+        "student enrollment", "course rosters", "grades and GPA",
+        "attendance logs", "financial aid", "learning outcomes"
+    ],
+    "Telecom": [
+        "CDR usage", "billing mediation", "tower performance",
+        "customer churn", "support tickets", "broadband installs"
+    ],
+    "Insurance": [
+        "policy administration", "claims adjudication", "premium billing",
+        "loss runs", "underwriting rules", "risk inspections"
+    ],
+    "Gaming": [
+        "session telemetry", "purchase events", "player retention",
+        "matchmaking", "anti-cheat", "economy balance"
+    ],
+    "Travel": [
+        "booking records", "fare classes", "loyalty points",
+        "ancillary sales", "on-time performance", "baggage handling"
+    ],
+    "Public Sector": [
+        "open permits", "service requests", "tax receipts",
+        "crime incidents", "public health reports", "zoning changes"
+    ],
+    "Environmental Monitoring": [
+        "water quality", "soil composition", "wildfire risk",
+        "weather stations", "biodiversity counts", "emissions inventory"
+    ],
+}
+
+regions = ["US", "EU", "APAC", "LATAM", "EMEA", "Global", "MEA", "ANZ", "Canada", "UK"]
+suffixes = ["Dataset", "Records", "Events", "Logs", "Archive", "Analytics"]
+sources = ["daily", "hourly", "event-level", "batch", "near-real-time"]
+storage = ["Parquet", "CSV", "Delta Lake", "Avro", "JSONL"]
+coverage = ["2016–2025", "2018–2025", "2019–2024", "2020–2025", "2021–2025", "rolling 36 months"]
+
+common_cols = [
+    "id","timestamp","date","created_at","updated_at","status","amount","currency","user_id","account_id",
+    "merchant_id","transaction_id","latitude","longitude","ip_address","device_id","country","city","zip_code",
+    "channel","category","subcategory","rating","score","label","is_fraud","event_type","product_id","order_id",
+    "price","quantity","discount","payment_method","balance","limit","risk_score","auth_code","response_code",
+    "error_code","browser","os","age","gender","income_bracket","education_level","employment_status","plan_type",
+    "premium","claim_id","policy_id","diagnosis_code","procedure_code","provider_id","hospital_id","sensor_id",
+    "reading_value","unit","anomaly_flag","campaign_id","impressions","clicks","conversions","ctr","cvr","cpc","roi",
+    "route_id","origin","destination","carrier","shipment_id","delivery_time","avg_speed","temperature_c","humidity_pct",
+    "co2_ppm","pm25","energy_kwh","voltage","current","power_factor","ticket_id","latency_ms","throughput_mbps",
+    "packet_loss_pct","jitter_ms"
+]
+
+domain_cols = {
+    "Fraud Detection": ["atm_id","pin_try_count","chargeback_reason","dispute_category","mcc","pos_entry_mode","chip_read","fallback_swipe","stolen_card_flag","velocity_window"],
+    "Payments": ["payment_id","settlement_date","payout_id","batch_id","authorization_code","avs_result"],
+    "Banking": ["ach_id","wire_id","loan_id","loan_amount","interest_rate","fico_score"],
+    "Healthcare": ["patient_id","encounter_id","cpt_code","icd10_code","dos","provider_npi"],
+    "E-commerce": ["session_id","sku","category_path","return_reason","promotion_code","coupon_id"],
+    "Social Media": ["post_id","comment_id","like_count","share_count","report_reason","moderation_action"],
+    "IoT Sensors": ["sensor_type","firmware_version","battery_pct","rssi","calibration_offset","alert_level"],
+    "Cybersecurity": ["src_ip","dst_ip","src_port","dst_port","protocol","signature_id"],
+    "Marketing": ["utm_source","utm_medium","utm_campaign","audience_id","segment_id","lifetime_value"],
+    "Logistics": ["container_id","fulfillment_center","waybill","pallet_id","stop_sequence","eta"],
+    "HR": ["employee_id","department","job_family","pay_grade","tenure_days","manager_id"],
+    "Real Estate": ["parcel_id","mls_id","beds","baths","sqft","hoa_fee"],
+    "Energy": ["substation_id","feeder_id","phase","outage_cause","restoration_time","tariff_code"],
+    "Education": ["student_id","course_id","credit_hours","term_code","instructor_id","cohort"],
+    "Telecom": ["msisdn","imsi","imei","cell_id","lac_tac","rat_type"],
+    "Insurance": ["adjuster_id","coverage_limit","deductible","loss_cause","reserve_amount","salvage_value"],
+    "Gaming": ["match_id","xp_gain","loot_drop","mmr","cheat_flag","session_length_sec"],
+    "Travel": ["pnr","fare_basis","leg_id","aircraft_type","delay_minutes","gate"],
+    "Public Sector": ["case_id","district","precinct","ordinance","violation_code","fine_amount"],
+    "Environmental Monitoring": ["station_id","watershed","aqi","pm10","so2_ppb","ozone_ppb"],
+}
+
+def random_columns(domain_key):
+    pool = common_cols + domain_cols.get(domain_key, [])
+    return random.sample(pool, 5)
+
+rows = []
+years = list(range(2016, datetime.utcnow().year + 1))
+for i in range(N):
+    domain = random.choice(list(domains.keys()))
+    topic = random.choice(domains[domain])
+    region = random.choice(regions)
+    suff = random.choice(suffixes)
+    year = random.choice(years)
+    src = random.choice(sources)
+    store = random.choice(storage)
+    cov = random.choice(coverage)
+
+    dataset_name = f"{domain}: {topic.title()} {suff} ({region}, {year})"
+
+    desc = (
+        f"This dataset contains {src} {topic} related to {domain.lower()} across {region}. "
+        f"Data is stored as {store} with coverage {cov}. "
+        f"Includes anonymized records suitable for analytics and modeling."
+    )
+
+    cols = random_columns(domain)
+    rows.append({
+        "dataset_name": dataset_name,
+        "dataset_description": desc,
+        "attribute_names": json.dumps(cols, ensure_ascii=False)
+    })
+
+df = pd.DataFrame(rows)
+
+# Save to CSV
+out_path = "./synthetic_datasets_10k.csv"
+df.to_csv(out_path, index=False)
+
+
+
+!python model.py \
+  --input synthetic_datasets_10k.csv \
+  --output synthetic_datasets_10k_tags.csv \
+  --name_col dataset_name \
+  --desc_col dataset_description \
+  --attrs_col attribute_names \
+  --min_docs_for_l2 20
