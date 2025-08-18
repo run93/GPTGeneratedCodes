@@ -1,0 +1,483 @@
+# -*- coding: utf-8 -*-
+"""
+Two-Level Topic Modeling & Tagging (No Seeds, Size-Safe Vectorizer)
+-------------------------------------------------------------------
+- LEVEL 1: BERTopic on all datasets (UMAP + HDBSCAN + c-TF-IDF)
+- LEVEL 2: Subcluster EVERY sufficiently large Level-1 topic (by doc count)
+- Labels are auto-generated from each topic’s top c-TF-IDF tokens
+- Robust for small subsets: dynamic min_df/max_df per corpus
+- Stronger stopwords so boilerplate like "dataset/EMEA/ANZ" doesn’t dominate
+
+Install:
+    pip install -U bertopic hdbscan umap-learn sentence-transformers scikit-learn pandas numpy
+
+Run example:
+    python two_level_topic_framework_full.py \
+        --input datasets.csv \
+        --output datasets_with_tags.csv \
+        --name_col dataset_name \
+        --desc_col dataset_description \
+        --attrs_col attribute_names \
+        --min_docs_for_l2 100 \
+        --l1_min_cluster_size 120 \
+        --l2_min_cluster_size 25
+"""
+
+import argparse
+import ast
+import math
+import re
+from pathlib import Path
+from typing import Iterable, List, Dict, Tuple, Optional
+
+import numpy as np
+import pandas as pd
+
+from sklearn.feature_extraction.text import CountVectorizer, ENGLISH_STOP_WORDS
+from umap import UMAP
+from hdbscan import HDBSCAN
+from sentence_transformers import SentenceTransformer
+from bertopic import BERTopic
+from bertopic.representation import KeyBERTInspired
+
+
+# ------------------------------
+# Extra stopwords (merged with sklearn's)
+# ------------------------------
+EXTRA_STOP = {
+    # generic data words
+    "data","dataset","datasets","record","records","event","events","log","logs","archive","analytics",
+    "table","tables","file","files","report","reports",
+    # storage/formats
+    "parquet","csv","json","jsonl","avro","delta","lake","deltalake","delta_lake",
+    # cadence/ingest
+    "daily","hourly","batch","eventlevel","event","near","real","time","realtime","nearreal",
+    # regions
+    "anz","apac","emea","latam","global","us","eu","uk","canada",
+    # plumbing
+    "system","systems","service","services","platform","platforms","application","applications",
+    "pipeline","pipelines","process","processes","source","sources"
+}
+
+def build_stop_list() -> List[str]:
+    """Return sklearn-compatible stopword LIST."""
+    return sorted(list(set(ENGLISH_STOP_WORDS) | set(EXTRA_STOP)))
+
+
+# ------------------------------
+# Dynamic DF bounds (size-safe)
+# ------------------------------
+def calc_df_bounds(n_docs: int,
+                   min_df_target: int = 5,
+                   min_df_frac: float = 0.005,   # 0.5% of docs
+                   max_df_frac: float = 0.90) -> Tuple[int, float]:
+    """
+    Return (min_df_int, max_df_float) that always satisfy:
+      - min_df_int >= 1
+      - 0 < max_df_float <= 1
+      - max_df_docs >= min_df_docs + 1  (avoids sklearn ValueError)
+    For very small corpora, falls back to permissive settings.
+    """
+    if n_docs <= 3:
+        return 1, 1.0
+
+    min_df_int = max(1, min(min_df_target, int(math.floor(n_docs * min_df_frac))))
+    # Ensure max_df admits at least one more doc than min_df
+    need_frac = (min_df_int + 1) / max(1, n_docs)
+    max_df_float = max(max_df_frac, need_frac)
+    max_df_float = min(1.0, max_df_float)
+
+    if min_df_int >= n_docs:  # extreme edge case
+        min_df_int = max(1, n_docs - 1)
+        max_df_float = 1.0
+
+    return min_df_int, max_df_float
+
+
+# ------------------------------
+# Text building
+# ------------------------------
+def _join_attr(x: Iterable[str]) -> str:
+    """Turn attribute_names (list/tuple/set or JSON-like string) into space-separated tokens."""
+    if x is None or (isinstance(x, float) and math.isnan(x)):
+        return ""
+    if isinstance(x, str):
+        try:
+            maybe = ast.literal_eval(x)
+            if isinstance(maybe, (list, tuple, set)):
+                return " ".join(map(str, maybe))
+            return x
+        except Exception:
+            return x
+    if isinstance(x, (list, tuple, set)):
+        return " ".join(map(str, x))
+    return str(x)
+
+
+def _clean_text(s: str) -> str:
+    s = s or ""
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+def build_text(df: pd.DataFrame,
+               name_col: str,
+               desc_col: str,
+               attrs_col: str,
+               weights: Tuple[float, float, float] = (2.0, 1.0, 2.0)) -> List[str]:
+    """Create a weighted text field by repeating sections (portable no-deps trick)."""
+    w_name, w_desc, w_attr = weights
+    out: List[str] = []
+    for _, row in df.iterrows():
+        name = _clean_text(str(row.get(name_col, "")))
+        desc = _clean_text(str(row.get(desc_col, "")))
+        attrs = _clean_text(_join_attr(row.get(attrs_col, "")))
+        t = " ".join([name] * max(1, int(w_name)))
+        t += " " + (" ".join([desc] * max(1, int(w_desc))) if w_desc >= 1 else desc)
+        t += " " + (" ".join([attrs] * max(1, int(w_attr))) if w_attr >= 1 else attrs)
+        out.append(t.strip())
+    return out
+
+
+# ------------------------------
+# Embeddings
+# ------------------------------
+def embed_texts(texts: List[str], model_name: str = "all-MiniLM-L6-v2") -> Tuple[np.ndarray, SentenceTransformer]:
+    model = SentenceTransformer(model_name)
+    embs = model.encode(texts, batch_size=512, show_progress_bar=True, normalize_embeddings=True)
+    return np.asarray(embs), model
+
+
+# ------------------------------
+# BERTopic constructor & labeling
+# ------------------------------
+def make_topic_model(embed_model: SentenceTransformer,
+                     n_neighbors: int,
+                     n_components: int,
+                     min_dist: float,
+                     min_cluster_size: int,
+                     min_samples: int,
+                     max_features: int,
+                     ngram_range: Tuple[int, int],
+                     token_pattern: str,
+                     min_df_val: int,
+                     max_df_val: float) -> BERTopic:
+    umap_model = UMAP(
+        n_neighbors=n_neighbors,
+        n_components=n_components,
+        min_dist=min_dist,
+        metric="cosine",
+        random_state=42,
+    )
+    hdbscan_model = HDBSCAN(
+        min_cluster_size=min_cluster_size,
+        min_samples=min_samples,
+        metric="euclidean",
+        cluster_selection_method="eom",
+        prediction_data=False,
+    )
+    stop_list = build_stop_list()
+    vectorizer = CountVectorizer(
+        ngram_range=ngram_range,
+        stop_words=stop_list,      # LIST, not set
+        min_df=min_df_val,         # INT
+        max_df=max_df_val,         # FLOAT in (0,1]
+        token_pattern=token_pattern,
+        max_features=max_features,
+    )
+    rep = KeyBERTInspired()
+
+    tm = BERTopic(
+        embedding_model=embed_model,
+        umap_model=umap_model,
+        hdbscan_model=hdbscan_model,
+        vectorizer_model=vectorizer,
+        representation_model=rep,
+        calculate_probabilities=False,
+        verbose=True,
+    )
+    return tm
+
+
+def topic_top_words(model: BERTopic, topic_id: int, top_k: int = 10) -> List[str]:
+    items = model.get_topic(topic_id) or []
+    return [w for w, _ in items[:top_k]]
+
+
+def auto_label_from_words(words: List[str], top_k: int = 3) -> str:
+    if not words:
+        return "Other"
+    return " ".join(words[:top_k]).title()
+
+
+# ------------------------------
+# Level-1
+# ------------------------------
+def cluster_level1(texts: List[str],
+                   embeddings: np.ndarray,
+                   embed_model: SentenceTransformer,
+                   l1_params: Dict) -> Tuple[BERTopic, np.ndarray, pd.DataFrame, Dict[int, str]]:
+    n_docs = len(texts)
+    min_df_v, max_df_v = calc_df_bounds(n_docs)
+    tm = make_topic_model(
+        embed_model=embed_model,
+        n_neighbors=l1_params.get("n_neighbors", 15),
+        n_components=l1_params.get("n_components", 5),
+        min_dist=l1_params.get("min_dist", 0.0),
+        min_cluster_size=l1_params.get("min_cluster_size", 120),
+        min_samples=l1_params.get("min_samples", 10),
+        max_features=l1_params.get("max_features", 90000),
+        ngram_range=l1_params.get("ngram_range", (1, 2)),
+        token_pattern=l1_params.get("token_pattern", r"(?u)\b[a-zA-Z][a-zA-Z]+\b"),
+        min_df_val=min_df_v,
+        max_df_val=max_df_v,
+    )
+    topics, _ = tm.fit_transform(texts, embeddings=embeddings)
+    info = tm.get_topic_info()  # Topic, Count, Name
+    id_to_tag: Dict[int, str] = {}
+    for tid in info["Topic"].tolist():
+        if tid == -1:
+            id_to_tag[tid] = "Outlier"
+            continue
+        words = topic_top_words(tm, tid, top_k=6)
+        id_to_tag[tid] = auto_label_from_words(words, top_k=3)
+    return tm, np.asarray(topics), info, id_to_tag
+
+
+# ------------------------------
+# Level-2 (generic; every large parent)
+# ------------------------------
+def cluster_level2(texts: List[str],
+                   embeddings: np.ndarray,
+                   embed_model: SentenceTransformer,
+                   l2_params: Dict) -> Tuple[BERTopic, np.ndarray, pd.DataFrame]:
+    n_docs = len(texts)
+    min_df_v, max_df_v = calc_df_bounds(n_docs)  # size-aware per subset
+    tm = make_topic_model(
+        embed_model=embed_model,
+        n_neighbors=l2_params.get("n_neighbors", 15),
+        n_components=l2_params.get("n_components", 5),
+        min_dist=l2_params.get("min_dist", 0.0),
+        min_cluster_size=l2_params.get("min_cluster_size", 25),
+        min_samples=l2_params.get("min_samples", 5),
+        max_features=l2_params.get("max_features", 70000),
+        ngram_range=l2_params.get("ngram_range", (1, 2)),
+        token_pattern=l2_params.get("token_pattern", r"(?u)\b[a-zA-Z][a-zA-Z]+\b"),
+        min_df_val=min_df_v,
+        max_df_val=max_df_v,
+    )
+    topics, _ = tm.fit_transform(texts, embeddings=embeddings)
+    info = tm.get_topic_info()
+    return tm, np.asarray(topics), info
+
+
+def make_lvl2_tags(model: BERTopic, info: pd.DataFrame, parent_name: str) -> Dict[int, str]:
+    mapping: Dict[int, str] = {}
+    for t in info["Topic"].tolist():
+        if t == -1:
+            mapping[t] = f"{parent_name} | Other"
+        else:
+            words = topic_top_words(model, t, top_k=5)
+            mapping[t] = f"{parent_name} | {auto_label_from_words(words, top_k=2)}"
+    return mapping
+
+
+def subcluster_all_parents(texts: List[str],
+                           embeddings: np.ndarray,
+                           l1_topics: np.ndarray,
+                           l1_info: pd.DataFrame,
+                           l1_tag_map: Dict[int, str],
+                           embed_model: SentenceTransformer,
+                           l2_params: Dict,
+                           min_docs_for_l2: int = 300,
+                           filter_l1_contains: Optional[str] = None,
+                           out_dir: Path = Path(".")) -> Tuple[np.ndarray, Dict[int, pd.DataFrame]]:
+    """Return tag_lvl2 for each row + dict of parent_id -> l2_info DataFrame."""
+    tag_lvl2 = np.array([""] * len(texts), dtype=object)
+    l2_infos: Dict[int, pd.DataFrame] = {}
+    skipped_rows = []
+
+    counts = dict(zip(l1_info["Topic"].tolist(), l1_info["Count"].tolist()))
+
+    for pid in l1_info["Topic"].tolist():
+        if pid == -1:
+            continue
+        parent_count = int(counts.get(pid, 0))
+        parent_name = l1_tag_map.get(pid, str(l1_info.loc[l1_info["Topic"] == pid, "Name"].values[0]))
+
+        # Filter by substring if requested
+        if filter_l1_contains and filter_l1_contains.lower() not in parent_name.lower():
+            skipped_rows.append([pid, parent_name, parent_count, f"filtered by --filter_l1_contains='{filter_l1_contains}'"])
+            continue
+        # Size gate
+        if parent_count < min_docs_for_l2:
+            skipped_rows.append([pid, parent_name, parent_count, f"below min_docs_for_l2 ({parent_count} < {min_docs_for_l2})"])
+            continue
+
+        # Subset
+        indices = np.where(l1_topics == pid)[0]
+        sub_texts = [texts[i] for i in indices]
+        sub_embs = embeddings[indices]
+
+        l2_model, l2_topics, l2_info = cluster_level2(sub_texts, sub_embs, embed_model, l2_params)
+        l2_tag_map = make_lvl2_tags(l2_model, l2_info, parent_name=parent_name)
+
+        # Assign back to all rows
+        for k, global_i in enumerate(indices):
+            tag_lvl2[global_i] = l2_tag_map.get(int(l2_topics[k]), f"{parent_name} | Other")
+
+        # Persist L2 report(s)
+        l2_info_out = l2_info.copy()
+        l2_info_out.insert(0, "ParentTopicID", pid)
+        l2_info_out.insert(1, "ParentTag", parent_name)
+        l2_infos[pid] = l2_info_out
+        (out_dir / f"level2_topics_parent_{pid}.csv").parent.mkdir(parents=True, exist_ok=True)
+        l2_info_out.to_csv(out_dir / f"level2_topics_parent_{pid}.csv", index=False)
+
+    # Combined + skipped report
+    if l2_infos:
+        pd.concat(list(l2_infos.values()), ignore_index=True).to_csv(out_dir / "level2_topics_all.csv", index=False)
+    if skipped_rows:
+        pd.DataFrame(skipped_rows, columns=["Topic", "L1_Tag", "Count", "Reason"]).to_csv(out_dir / "level2_skipped.csv", index=False)
+    return tag_lvl2, l2_infos
+
+
+# ------------------------------
+# Pipeline & CLI
+# ------------------------------
+def run_pipeline(df: pd.DataFrame,
+                 name_col: str = "dataset_name",
+                 desc_col: str = "dataset_description",
+                 attrs_col: str = "attribute_names",
+                 weights: Tuple[float, float, float] = (2.0, 1.0, 2.0),
+                 embedding_model: str = "all-MiniLM-L6-v2",
+                 l1_params: Optional[Dict] = None,
+                 l2_params: Optional[Dict] = None,
+                 min_docs_for_l2: int = 300,
+                 filter_l1_contains: Optional[str] = None,
+                 out_dir: Path = Path("."),
+                 output_path: Optional[Path] = None) -> pd.DataFrame:
+
+    l1_params = l1_params or {}
+    l2_params = l2_params or {}
+
+    # Build texts + embeddings
+    texts = build_text(df, name_col, desc_col, attrs_col, weights=weights)
+    embs, embed_model = embed_texts(texts, model_name=embedding_model)
+
+    # Level-1
+    l1_model, l1_assign, l1_info, l1_tag_map = cluster_level1(texts, embs, embed_model, l1_params)
+
+    # Assign L1 to DF
+    out = df.copy()
+    out["topic_lvl1_id"] = l1_assign
+    out["tag_lvl1"] = out["topic_lvl1_id"].map(l1_tag_map).fillna("Outlier")
+
+    # Save L1 topics
+    l1_info.to_csv(out_dir / "level1_topics.csv", index=False)
+
+    # Level-2 for ALL parents (filtered/thresholded)
+    tag_lvl2, _ = subcluster_all_parents(texts, embs, l1_assign, l1_info, l1_tag_map,
+                                         embed_model, l2_params, min_docs_for_l2,
+                                         filter_l1_contains, out_dir)
+    out["tag_lvl2"] = tag_lvl2
+
+    # Save main CSV
+    if output_path is not None:
+        out.to_csv(output_path, index=False)
+    return out
+
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Two-Level Topic Modeling (No Seeds, All Parents Subclustered)")
+    p.add_argument("--input", required=True, help="Input CSV with columns (name/desc/attrs)")
+    p.add_argument("--output", required=True, help="Output CSV with tags")
+    p.add_argument("--name_col", default="dataset_name")
+    p.add_argument("--desc_col", default="dataset_description")
+    p.add_argument("--attrs_col", default="attribute_names")
+    p.add_argument("--weights", default="2,1,2", help="Weights for name,desc,attrs e.g. '2,1,2'")
+    p.add_argument("--embedding_model", default="all-MiniLM-L6-v2")
+
+    # L1 params
+    p.add_argument("--l1_min_cluster_size", type=int, default=120)
+    p.add_argument("--l1_min_samples", type=int, default=10)
+    p.add_argument("--l1_n_neighbors", type=int, default=15)
+    p.add_argument("--l1_n_components", type=int, default=5)
+    p.add_argument("--l1_min_dist", type=float, default=0.0)
+    p.add_argument("--l1_max_features", type=int, default=90000)
+
+    # L2 params
+    p.add_argument("--l2_min_cluster_size", type=int, default=25)
+    p.add_argument("--l2_min_samples", type=int, default=5)
+    p.add_argument("--l2_n_neighbors", type=int, default=15)
+    p.add_argument("--l2_n_components", type=int, default=5)
+    p.add_argument("--l2_min_dist", type=float, default=0.0)
+    p.add_argument("--l2_max_features", type=int, default=70000)
+
+    p.add_argument("--min_docs_for_l2", type=int, default=300)
+    p.add_argument("--filter_l1_contains", default=None)
+
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    in_path = Path(args.input)
+    out_path = Path(args.output)
+    out_dir = out_path.parent
+
+    df = pd.read_csv(in_path)
+
+    # Validate columns
+    for col in (args.name_col, args.desc_col, args.attrs_col):
+        if col not in df.columns:
+            raise ValueError(f"Missing required column: {col}")
+
+    weights = tuple(float(x) for x in args.weights.split(","))
+
+    l1_params = dict(
+        min_cluster_size=args.l1_min_cluster_size,
+        min_samples=args.l1_min_samples,
+        n_neighbors=args.l1_n_neighbors,
+        n_components=args.l1_n_components,
+        min_dist=args.l1_min_dist,
+        max_features=args.l1_max_features,
+        ngram_range=(1, 2),
+        token_pattern=r"(?u)\b[a-zA-Z][a-zA-Z]+\b",
+    )
+    l2_params = dict(
+        min_cluster_size=args.l2_min_cluster_size,
+        min_samples=args.l2_min_samples,
+        n_neighbors=args.l2_n_neighbors,
+        n_components=args.l2_n_components,
+        min_dist=args.l2_min_dist,
+        max_features=args.l2_max_features,
+        ngram_range=(1, 2),
+        token_pattern=r"(?u)\b[a-zA-Z][a-zA-Z]+\b",
+    )
+
+    run_pipeline(
+        df,
+        name_col=args.name_col,
+        desc_col=args.desc_col,
+        attrs_col=args.attrs_col,
+        weights=weights,  # type: ignore
+        embedding_model=args.embedding_model,
+        l1_params=l1_params,
+        l2_params=l2_params,
+        min_docs_for_l2=args.min_docs_for_l2,
+        filter_l1_contains=args.filter_l1_contains,
+        out_dir=out_dir,
+        output_path=out_path,
+    )
+
+    print(f"Saved assignments to: {out_path}")
+    print(f"Saved Level-1 topics to: {out_dir / 'level1_topics.csv'}")
+    if (out_dir / "level2_topics_all.csv").exists():
+        print(f"Saved combined Level-2 topics to: {out_dir / 'level2_topics_all.csv'}")
+    if (out_dir / "level2_skipped.csv").exists():
+        print(f"Saved Level-2 skip reasons to: {out_dir / 'level2_skipped.csv'}")
+
+
+if __name__ == "__main__":
+    main()
