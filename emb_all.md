@@ -1,3 +1,135 @@
+Excellent — so your **queries are from the same 500k-name database** (i.e., you want to find semantically similar names *within the same corpus*).
+
+That’s a **self-retrieval / nearest-neighbor lookup** problem — you’ll build one embedding space, and then for every name, retrieve its top-k nearest neighbors (e.g., synonyms, duplicates, alternate spellings).
+
+Here’s how to do it efficiently and safely for a dataset of ~500 000 names 👇
+
+---
+
+## 🧩 1. One-time embedding + index build
+
+```python
+from sentence_transformers import SentenceTransformer
+import numpy as np
+import faiss
+from tqdm import tqdm
+import pickle
+
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+# names = [...]  # your 500k list
+
+# Encode in batches
+embeddings = []
+batch_size = 2048
+for i in tqdm(range(0, len(names), batch_size)):
+    batch = names[i:i+batch_size]
+    emb = model.encode(batch, normalize_embeddings=True)
+    embeddings.append(emb)
+
+embeddings = np.vstack(embeddings).astype('float32')
+
+# Save for reuse
+np.save("name_embeddings.npy", embeddings)
+with open("names.pkl", "wb") as f:
+    pickle.dump(names, f)
+```
+
+---
+
+## ⚡ 2. Build FAISS index (approximate = fast)
+
+For 500 000 vectors, you can still use **exact search (IndexFlatIP)**,
+but if you expect to grow larger (millions), use **IVF** or **HNSW**.
+
+### Option A — exact cosine search
+
+```python
+d = embeddings.shape[1]
+index = faiss.IndexFlatIP(d)  # cosine because we normalized
+index.add(embeddings)
+faiss.write_index(index, "names_flat.index")
+```
+
+### Option B — IVF (inverted file index) for speed
+
+```python
+nlist = 1000  # number of coarse clusters
+quantizer = faiss.IndexFlatIP(d)
+index = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
+index.train(embeddings)
+index.add(embeddings)
+faiss.write_index(index, "names_ivf.index")
+```
+
+---
+
+## 🔍 3. Self-retrieval — find top-k similar names
+
+Now you can search *each name against all others*:
+
+```python
+import faiss
+import numpy as np
+import pickle
+
+index = faiss.read_index("names_ivf.index")
+with open("names.pkl", "rb") as f:
+    names = pickle.load(f)
+embeddings = np.load("name_embeddings.npy")
+
+# search
+k = 5  # top 5 similar names
+D, I = index.search(embeddings, k + 1)  # +1 to include itself
+
+# build result dictionary
+similar_names = {}
+for i, name in enumerate(names):
+    neighbors = []
+    for j, idx in enumerate(I[i]):
+        if idx == i:  # skip self
+            continue
+        neighbors.append((names[idx], float(D[i,j])))
+    similar_names[name] = neighbors[:k]
+```
+
+---
+
+## 📊 4. Example output
+
+```python
+for name, sims in list(similar_names.items())[:5]:
+    print(f"\n🔹 {name}")
+    for n, score in sims:
+        print(f"   {n:25s}  (score={score:.3f})")
+```
+
+```
+🔹 account id
+   account identifier        (score=0.935)
+   acct id                   (score=0.904)
+   user account id           (score=0.882)
+   account_number            (score=0.863)
+   acct identifier           (score=0.850)
+```
+
+---
+
+## 🧠 Notes for scale
+
+| Task                  | Recommendation                                      |
+| --------------------- | --------------------------------------------------- |
+| Speed up large corpus | Use `IndexIVFFlat` or `IndexHNSWFlat`               |
+| Reduce memory         | Convert embeddings to `float16` before indexing     |
+| Parallel search       | Use `faiss.IndexShards`                             |
+| Persist to cloud      | Try Milvus, Weaviate, or Pinecone                   |
+| Analysis              | Cluster with `faiss.Clustering` or `sklearn.KMeans` |
+
+---
+
+Would you like me to add a section that automatically **detects duplicates or near-duplicates** (e.g., `"acct_id"` ≈ `"account id"`) above a similarity threshold and exports them to a CSV file?
+
+
 非常好！你问的这个点是关键。✅
 是的——在这种结构下，“**重复使用靠切片**”是最直接、高效、干净的做法。
 
