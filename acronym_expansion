@@ -1,58 +1,63 @@
 import re
 
-def solve_shorthand_final(text, shorthand):
-    # 1. Clean shorthand: 'mg_score' -> 'mgscore'
+def solve_shorthand_complete(text, shorthand):
+    # 1. Normalize shorthand (remove underscores/spaces)
+    # 'trdcnt' stays 'trdcnt', 'mg_score' becomes 'mgscore'
     clean_short = re.sub(r'[^a-zA-Z0-9]', '', shorthand).lower()
+    if not clean_short: return "Invalid input"
+
+    # ---------------------------------------------------------
+    # STEP 1: MARK (Word-Aware Regex)
+    # \b          -> Start at the beginning of a word
+    # {first}     -> The first letter of your shorthand
+    # (?:.|\n)*?  -> Any characters (lazy) until...
+    # {last}      -> The last letter of your shorthand
+    # \w*\b       -> The rest of that word and the boundary
+    # ---------------------------------------------------------
+    first, last = clean_short[0], clean_short[-1]
     
-    # ---------------------------------------------------------
-    # STEP 1: MARK (The "Full Word" Regex)
-    # We look for the first letter at a word boundary (\b).
-    # For every following letter, we allow spaces or letters, 
-    # BUT we ensure the very last letter captures the rest of its word (\w*).
-    # ---------------------------------------------------------
+    # We use a non-greedy catch-all between the first and last letters.
+    # We then verify the internal sequence in Step 2.
+    pattern = rf"\b{re.escape(first)}(?:.|\n)*?{re.escape(last)}\w*\b"
     
-    # Build parts: Each char followed by potential word-middle chars
-    parts = []
-    for i, char in enumerate(clean_short):
-        if i == 0:
-            # First char must be at the start of a word
-            parts.append(rf"\b{char}")
-        elif i == len(clean_short) - 1:
-            # Last char must capture the rest of its word
-            parts.append(rf".*?{char}\w*")
-        else:
-            # Middle chars just need to appear in order
-            parts.append(rf".*?{char}")
-            
-    pattern = "".join(parts)
-    
-    # ---------------------------------------------------------
-    # STEP 2: FIND & SCORE
-    # We find all overlapping matches to ensure we get the densest one.
-    # ---------------------------------------------------------
+    # Find overlapping matches to ensure we find the "tightest" one
+    # (e.g., ignoring "to calculate the" if "trade" also starts with 't')
     search_pattern = f"(?=({pattern}))"
-    matches = [m.group(1) for m in re.finditer(search_pattern, text, re.IGNORECASE)]
+    potential_spans = [m.group(1) for m in re.finditer(search_pattern, text, re.IGNORECASE)]
+
+    # ---------------------------------------------------------
+    # STEP 2: FIND MOST POTENTIAL COMBINATION
+    # We filter out spans that don't contain ALL shorthand letters in order,
+    # then we pick the one with the highest character density.
+    # ---------------------------------------------------------
+    valid_candidates = []
     
-    if not matches:
-        return "No match found."
+    for span in potential_spans:
+        # Check if shorthand characters appear in order within this span
+        it = iter(span.lower())
+        if all(char in it for char in clean_short):
+            valid_candidates.append(span)
 
-    # Scoring by density: (Shorthand Length / Found String Length)
-    # This prevents "to calculate the daily trade count" from winning over "trade count"
-    def get_score(candidate):
-        return len(clean_short) / len(candidate)
+    if not valid_candidates:
+        return ""
 
-    # Return the match with the highest density score
-    return max(set(matches), key=get_score)
+    # Density Score = (Length of shorthand) / (Length of result)
+    # This ensures "trade count" wins over "to calculate the daily trade count"
+    def score(candidate):
+        # We also penalize for excessive number of words to keep it tight
+        word_count = len(candidate.split())
+        return (len(clean_short) / len(candidate)) - (word_count * 0.01)
 
-# --- Verification ---
+    return max(set(valid_candidates), key=score)
 
-test_cases = [
-    ("umls", "The Unified Medical Language System is a database."),
-    ("mg", "This is calculated from mortgage data."),
-    ("trdcnt", "The daily trade count is high.")
+# --- Test Bench ---
+test_data = [
+    ("umls", "The Unified System Lexicon."), #The Unified Medical Language System Lexicon
+    ("mg", "Data from the mortgage rate table."),
+    ("trdcnt", "The total trade count was recorded.")
 ]
 
 print(f"{'INPUT':<10} | {'RESULT'}")
-print("-" * 40)
-for short, txt in test_cases:
-    print(f"{short:<10} | {solve_shorthand_final(txt, short)}")
+print("-" * 45)
+for short, paragraph in test_data:
+    print(f"{short:<10} | {solve_shorthand_complete(paragraph, short)}")
