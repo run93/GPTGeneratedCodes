@@ -1,0 +1,58 @@
+import re
+
+def solve_shorthand_final(text, shorthand):
+    # 1. Clean shorthand: 'mg_score' -> 'mgscore'
+    clean_short = re.sub(r'[^a-zA-Z0-9]', '', shorthand).lower()
+    
+    # ---------------------------------------------------------
+    # STEP 1: MARK (The "Full Word" Regex)
+    # We look for the first letter at a word boundary (\b).
+    # For every following letter, we allow spaces or letters, 
+    # BUT we ensure the very last letter captures the rest of its word (\w*).
+    # ---------------------------------------------------------
+    
+    # Build parts: Each char followed by potential word-middle chars
+    parts = []
+    for i, char in enumerate(clean_short):
+        if i == 0:
+            # First char must be at the start of a word
+            parts.append(rf"\b{char}")
+        elif i == len(clean_short) - 1:
+            # Last char must capture the rest of its word
+            parts.append(rf".*?{char}\w*")
+        else:
+            # Middle chars just need to appear in order
+            parts.append(rf".*?{char}")
+            
+    pattern = "".join(parts)
+    
+    # ---------------------------------------------------------
+    # STEP 2: FIND & SCORE
+    # We find all overlapping matches to ensure we get the densest one.
+    # ---------------------------------------------------------
+    search_pattern = f"(?=({pattern}))"
+    matches = [m.group(1) for m in re.finditer(search_pattern, text, re.IGNORECASE)]
+    
+    if not matches:
+        return "No match found."
+
+    # Scoring by density: (Shorthand Length / Found String Length)
+    # This prevents "to calculate the daily trade count" from winning over "trade count"
+    def get_score(candidate):
+        return len(clean_short) / len(candidate)
+
+    # Return the match with the highest density score
+    return max(set(matches), key=get_score)
+
+# --- Verification ---
+
+test_cases = [
+    ("umls", "The Unified Medical Language System is a database."),
+    ("mg", "This is calculated from mortgage data."),
+    ("trdcnt", "The daily trade count is high.")
+]
+
+print(f"{'INPUT':<10} | {'RESULT'}")
+print("-" * 40)
+for short, txt in test_cases:
+    print(f"{short:<10} | {solve_shorthand_final(txt, short)}")
